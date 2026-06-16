@@ -204,8 +204,9 @@ Mỗi component một file, một trách nhiệm rõ ràng, test độc lập đ
 function buildLaunchArgs(p: Profile): LaunchPersistentContextOptions {
   const args = [`--fingerprint=${p.seed}`];
 
-  // WebRTC: chống lộ IP thật. Luôn bật khi có proxy.
-  if (p.proxy) args.push('--fingerprint-webrtc-ip=auto');
+  // WebRTC: chống lộ IP thật. geoip=true đã tự inject --fingerprint-webrtc-ip,
+  // nên chỉ thêm tay khi có proxy mà geoip tắt (tránh trùng cờ).
+  if (p.proxy && !p.geoip) args.push('--fingerprint-webrtc-ip=auto');
 
   return {
     userDataDir: p.userDataDir,
