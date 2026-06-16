@@ -8,7 +8,7 @@ import type { Profile, CreateProfileInput, UpdateProfileInput } from './types';
 interface Data { profiles: Profile[] }
 interface Opts { seedGen?: () => number; idGen?: () => string }
 
-const defaultSeed = () => Math.floor(Math.random() * 89_990_000) + 10_000;
+const defaultSeed = () => Math.floor(Math.random() * 99_990_000) + 10_000;
 
 export class ProfileStore {
   private db!: Low<Data>;
