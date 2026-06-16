@@ -36,7 +36,7 @@ describe('BrowserManager', () => {
     const { mgr, launcher } = await setup();
     await mgr.launch('p1');
     expect(launcher).toHaveBeenCalledOnce();
-    expect(launcher.mock.calls[0][0].args).toContain('--fingerprint=9');
+    expect((launcher.mock.calls[0] as any[])[0].args).toContain('--fingerprint=9');
     expect(mgr.isRunning('p1')).toBe(true);
   });
 
