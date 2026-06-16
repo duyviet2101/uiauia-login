@@ -1,0 +1,38 @@
+appId: com.cloakbrowser.manager
+productName: CloakBrowser Manager
+copyright: Copyright © 2026
+
+directories:
+  output: dist
+  buildResources: build
+
+files:
+  - out/**/*
+  - node_modules/**/*
+
+# macOS
+mac:
+  category: public.app-category.utilities
+  target:
+    - target: dmg
+      arch:
+        - arm64
+        - x64
+
+dmg:
+  title: CloakBrowser Manager
+
+# Windows
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+
+# Linux (optional, skip)
+linux:
+  skip: true
