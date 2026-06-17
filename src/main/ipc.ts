@@ -19,10 +19,12 @@ export function registerIpc(
   ipcMain.handle('profiles:update', (_e, id: string, patch: UpdateProfileInput) => store.update(id, patch));
   ipcMain.handle('profiles:duplicate', (_e, id: string) => store.duplicate(id));
   ipcMain.handle('profiles:delete', (_e, id: string) => store.remove(id));
+  ipcMain.handle('profiles:regenerate-seed', (_e, id: string) => store.regenerateSeed(id));
 
   ipcMain.handle('browser:launch', (_e, id: string) => manager.launch(id));
   ipcMain.handle('browser:stop', (_e, id: string) => manager.stop(id));
   ipcMain.handle('browser:running', () => manager.runningIds());
+  ipcMain.handle('browser:open-url', (_e, id: string, url: string) => manager.openUrl(id, url));
 
   ipcMain.handle('proxy:test', (_e, proxy: ProxyConfig) => proxyTester.test(proxy));
 

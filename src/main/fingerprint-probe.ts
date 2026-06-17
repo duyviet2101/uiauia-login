@@ -72,3 +72,26 @@ export async function captureFingerprint(page: Page): Promise<Fingerprint> {
   const raw = (await page.evaluate(probeInPage)) as RawProbe;
   return parseFingerprint(raw);
 }
+
+// Loaded as a string so TypeScript doesn't try to resolve the remote module.
+const VISITOR_ID_SNIPPET = `(async () => {
+  try {
+    const fp = await import('https://openfpcdn.io/fingerprintjs/v4');
+    const agent = await fp.load();
+    const r = await agent.get();
+    return r.visitorId;
+  } catch { return null; }
+})()`;
+
+/**
+ * Compute the FingerprintJS v4 visitorId for the current page — a single
+ * "device id" the way commercial fingerprinters see it. Best-effort: needs
+ * network + a real (non-CSP-blocked) origin; returns null on any failure.
+ */
+export async function captureVisitorId(page: Page): Promise<string | null> {
+  try {
+    return (await page.evaluate(VISITOR_ID_SNIPPET)) as string | null;
+  } catch {
+    return null;
+  }
+}

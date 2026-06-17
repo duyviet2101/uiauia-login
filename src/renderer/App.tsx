@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { ProfileRuntime, ProxyWarning, InitState, CreateProfileInput } from '../main/types';
+import type { ProfileRuntime, ProxyWarning, InitState } from '../main/types';
 import { api, bridgeReady } from './api';
 import { ProfileList } from './components/ProfileList';
-import { ProfileForm } from './components/ProfileForm';
+import { ProfileForm, type ProfileFormValues } from './components/ProfileForm';
 import { StartupScreen } from './components/StartupScreen';
 import { ConfirmDialog } from './components/ConfirmDialog';
 import { ToastContainer, type ToastItem, type ToastKind } from './components/Toast';
+
+const TEST_FP_URL = 'https://browserleaks.com/canvas';
 
 export default function App() {
   const [init, setInit] = useState<InitState>(
@@ -16,9 +18,11 @@ export default function App() {
   const [profiles, setProfiles] = useState<ProfileRuntime[]>([]);
   const [warnings, setWarnings] = useState<ProxyWarning[]>([]);
   const [busy, setBusy] = useState<Set<string>>(new Set());
-  const [showForm, setShowForm] = useState(false);
+  const [formOpen, setFormOpen] = useState(false);
+  const [editing, setEditing] = useState<ProfileRuntime | null>(null);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [pendingDelete, setPendingDelete] = useState<ProfileRuntime | null>(null);
+  const [pendingReseed, setPendingReseed] = useState<ProfileRuntime | null>(null);
 
   const dismissToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
@@ -48,7 +52,6 @@ export default function App() {
     setWarnings(ws);
   }, []);
 
-  // Track main-process init state.
   useEffect(() => {
     if (!bridgeReady) return;
     api.getInitState().then(setInit).catch(() => {});
@@ -56,7 +59,6 @@ export default function App() {
     return () => { unsub(); };
   }, []);
 
-  // Once services are ready, load data and subscribe to live status changes.
   useEffect(() => {
     if (init.phase !== 'ready') return;
     refresh().catch((e) => addToast('error', String(e instanceof Error ? e.message : e)));
@@ -66,68 +68,68 @@ export default function App() {
     return () => { unsub(); };
   }, [init.phase, refresh, addToast]);
 
-  async function handleCreate(input: CreateProfileInput) {
+  function openCreate() { setEditing(null); setFormOpen(true); }
+  function openEdit(id: string) {
+    const p = profiles.find((x) => x.id === id) ?? null;
+    setEditing(p);
+    setFormOpen(true);
+  }
+
+  async function handleSubmit(values: ProfileFormValues) {
     try {
-      await api.create(input);
-      setShowForm(false);
+      if (editing) {
+        await api.update(editing.id, values);
+        addToast('success', `Đã lưu “${values.name}”.`);
+      } else {
+        await api.create(values);
+        addToast('success', `Đã tạo profile “${values.name}”.`);
+      }
+      setFormOpen(false);
+      setEditing(null);
       await refresh();
-      addToast('success', `Đã tạo profile “${input.name}”.`);
     } catch (e) {
       addToast('error', e instanceof Error ? e.message : String(e));
     }
   }
 
-  async function handleLaunch(id: string) {
+  async function withBusy(id: string, fn: () => Promise<void>, errPrefix: string) {
     setBusyFor(id, true);
     try {
-      await api.launch(id);
-      await refresh(); // pick up captured fingerprint
+      await fn();
     } catch (e) {
-      addToast('error', `Không mở được: ${e instanceof Error ? e.message : String(e)}`);
+      addToast('error', `${errPrefix}: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setBusyFor(id, false);
     }
   }
 
-  async function handleStop(id: string) {
-    setBusyFor(id, true);
-    try {
-      await api.stop(id);
-      await refresh();
-    } catch (e) {
-      addToast('error', `Không dừng được: ${e instanceof Error ? e.message : String(e)}`);
-    } finally {
-      setBusyFor(id, false);
-    }
-  }
-
-  async function handleDuplicate(id: string) {
-    setBusyFor(id, true);
-    try {
-      await api.duplicate(id);
-      await refresh();
-      addToast('success', 'Đã nhân bản profile.');
-    } catch (e) {
-      addToast('error', e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusyFor(id, false);
-    }
-  }
+  const handleLaunch = (id: string) => withBusy(id, async () => { await api.launch(id); await refresh(); }, 'Không mở được');
+  const handleStop = (id: string) => withBusy(id, async () => { await api.stop(id); await refresh(); }, 'Không dừng được');
+  const handleTest = (id: string) =>
+    withBusy(id, async () => { await api.openUrl(id, TEST_FP_URL); addToast('info', 'Đã mở trang kiểm tra fingerprint.'); }, 'Không mở trang test được');
+  const handleDuplicate = (id: string) =>
+    withBusy(id, async () => { await api.duplicate(id); await refresh(); addToast('success', 'Đã nhân bản profile.'); }, 'Lỗi nhân bản');
 
   async function confirmDelete() {
     const target = pendingDelete;
     if (!target) return;
     setPendingDelete(null);
-    setBusyFor(target.id, true);
-    try {
+    await withBusy(target.id, async () => {
       await api.remove(target.id);
       await refresh();
       addToast('success', `Đã xoá “${target.name}”.`);
-    } catch (e) {
-      addToast('error', e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusyFor(target.id, false);
-    }
+    }, 'Lỗi xoá');
+  }
+
+  async function confirmReseed() {
+    const target = pendingReseed;
+    if (!target) return;
+    setPendingReseed(null);
+    await withBusy(target.id, async () => {
+      await api.regenerateSeed(target.id);
+      await refresh();
+      addToast('success', 'Đã tạo danh tính mới. Mở lại profile để ghi nhận fingerprint mới.');
+    }, 'Lỗi đổi seed');
   }
 
   if (init.phase !== 'ready') {
@@ -142,14 +144,9 @@ export default function App() {
         <header className="flex items-center justify-between">
           <div>
             <h1 className="text-xl font-bold tracking-tight">CloakBrowser Manager</h1>
-            <p className="text-xs text-slate-400">
-              {profiles.length} profile · {runningCount} đang chạy
-            </p>
+            <p className="text-xs text-slate-400">{profiles.length} profile · {runningCount} đang chạy</p>
           </div>
-          <button
-            onClick={() => setShowForm(true)}
-            className="rounded-lg bg-blue-600 px-4 py-1.5 text-sm font-medium hover:bg-blue-500 transition-colors"
-          >
+          <button onClick={openCreate} className="rounded-lg bg-blue-600 px-4 py-1.5 text-sm font-medium hover:bg-blue-500 transition-colors">
             + Tạo profile
           </button>
         </header>
@@ -160,12 +157,21 @@ export default function App() {
           busy={busy}
           onLaunch={handleLaunch}
           onStop={handleStop}
+          onTest={handleTest}
+          onEdit={openEdit}
           onDuplicate={handleDuplicate}
+          onRegenerateSeed={(id) => setPendingReseed(profiles.find((p) => p.id === id) ?? null)}
           onDelete={(id) => setPendingDelete(profiles.find((p) => p.id === id) ?? null)}
         />
       </div>
 
-      {showForm && <ProfileForm onSubmit={handleCreate} onCancel={() => setShowForm(false)} />}
+      {formOpen && (
+        <ProfileForm
+          initial={editing ?? undefined}
+          onSubmit={handleSubmit}
+          onCancel={() => { setFormOpen(false); setEditing(null); }}
+        />
+      )}
 
       {pendingDelete && (
         <ConfirmDialog
@@ -175,6 +181,17 @@ export default function App() {
           danger
           onConfirm={confirmDelete}
           onCancel={() => setPendingDelete(null)}
+        />
+      )}
+
+      {pendingReseed && (
+        <ConfirmDialog
+          title="Đổi seed fingerprint"
+          message={`Tạo danh tính fingerprint hoàn toàn mới cho “${pendingReseed.name}”? Fingerprint cũ sẽ bị xoá và đo lại ở lần mở kế tiếp.`}
+          confirmLabel="Đổi seed"
+          danger
+          onConfirm={confirmReseed}
+          onCancel={() => setPendingReseed(null)}
         />
       )}
 

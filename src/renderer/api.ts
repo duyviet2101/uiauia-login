@@ -30,8 +30,10 @@ export const api = {
   update: (id: string, p: UpdateProfileInput) => need().updateProfile(id, p),
   duplicate: (id: string) => need().duplicateProfile(id),
   remove: (id: string) => need().deleteProfile(id),
+  regenerateSeed: (id: string) => need().regenerateSeed(id),
   launch: (id: string) => need().launch(id),
   stop: (id: string) => need().stop(id),
+  openUrl: (id: string, url: string) => need().openUrl(id, url),
   testProxy: (p: ProxyConfig): Promise<ProxyTestResult> => need().testProxy(p),
   onStatusChanged: (cb: (p: { id: string; running: boolean }) => void) => need().onStatusChanged(cb),
 };

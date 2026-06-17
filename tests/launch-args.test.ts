@@ -4,9 +4,9 @@ import type { Profile } from '../src/main/types';
 
 function profile(over: Partial<Profile> = {}): Profile {
   return {
-    id: 'p1', name: 'A', seed: 12345, proxy: null, geoip: true,
-    timezone: null, locale: null, userDataDir: '/data/p1',
-    fingerprint: null, createdAt: '', lastOpenedAt: null, ...over,
+    id: 'p1', name: 'A', seed: 12345, platform: 'windows', proxy: null, geoip: true,
+    timezone: null, locale: null, startUrl: null, userDataDir: '/data/p1',
+    fingerprint: null, visitorId: null, createdAt: '', lastOpenedAt: null, ...over,
   };
 }
 

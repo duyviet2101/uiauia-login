@@ -11,10 +11,10 @@ export function toProxyUrl(p: ProxyConfig): string {
 export function buildLaunchArgs(p: Profile): LaunchPersistentContextOptions {
   const args = [
     `--fingerprint=${p.seed}`,
-    // Present as a common Windows desktop. On macOS the cloakbrowser default
-    // runs "native" (real UA/GPU shared across profiles); forcing windows makes
-    // the binary derive a varied UA/GPU per seed and hides the host machine.
-    '--fingerprint-platform=windows',
+    // Per-profile spoofed OS. 'windows' makes the binary derive a varied UA/GPU
+    // from the seed and hides the host machine; 'macos' presents as a native
+    // Mac (UA/GPU closer to the real host — less variation across profiles).
+    `--fingerprint-platform=${p.platform === 'macos' ? 'macos' : 'windows'}`,
     // Headed Chromium blocks WebGL on software GPUs without this.
     '--ignore-gpu-blocklist',
   ];

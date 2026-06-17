@@ -4,18 +4,17 @@ import type { LaunchPersistentContextOptions } from 'cloakbrowser';
 import { launchPersistentContext } from 'cloakbrowser';
 import type { ProfileStore } from './store';
 import { buildLaunchArgs } from './launch-args';
-import { captureFingerprint } from './fingerprint-probe';
+import { captureFingerprint, captureVisitorId } from './fingerprint-probe';
 import type { Fingerprint } from './types';
 
 type Launcher = (opts: LaunchPersistentContextOptions) => Promise<BrowserContext>;
 type Capturer = (page: Page) => Promise<Fingerprint>;
 
-/**
- * Page the browser lands on after launch. Playwright opens a persistent
- * context on a bare about:blank tab; we navigate it somewhere usable so the
- * user isn't greeted by an empty page. Change this to taste.
- */
-const START_URL = 'https://www.google.com';
+/** Fallback landing page when a profile has no custom startUrl. */
+export const DEFAULT_START_URL = 'https://www.google.com';
+
+/** Controlled, CSP-free origin used to probe fingerprint + FingerprintJS id. */
+const PROBE_URL = 'https://example.com';
 
 export class BrowserManager extends EventEmitter {
   private running = new Map<string, BrowserContext>();
@@ -24,6 +23,7 @@ export class BrowserManager extends EventEmitter {
     private store: ProfileStore,
     private launcher: Launcher = launchPersistentContext,
     private capturer: Capturer = captureFingerprint,
+    private visitorCapturer: (page: Page) => Promise<string | null> = captureVisitorId,
   ) { super(); }
 
   async launch(id: string): Promise<void> {
@@ -38,19 +38,37 @@ export class BrowserManager extends EventEmitter {
       this.emit('status-changed', id, false);
     });
 
-    // Reuse the context's default page rather than opening another tab.
     const page = ctx.pages()[0] ?? (await ctx.newPage());
 
-    if (!profile.fingerprint) {
-      const fp = await this.capturer(page);
-      await this.store.update(id, { fingerprint: fp });
+    // First time we see this profile, probe its fingerprint (and FingerprintJS
+    // visitor id) on a controlled origin, then move on to the landing page.
+    if (!profile.fingerprint || !profile.visitorId) {
+      await page.goto(PROBE_URL).catch(() => {});
+      if (!profile.fingerprint) {
+        const fp = await this.capturer(page);
+        await this.store.update(id, { fingerprint: fp });
+      }
+      if (!profile.visitorId) {
+        const vid = await this.visitorCapturer(page).catch(() => null);
+        if (vid) await this.store.update(id, { visitorId: vid });
+      }
     }
-    await this.store.update(id, { lastOpenedAt: new Date().toISOString() });
 
-    // Land on a usable page (best-effort — don't fail the launch on nav error).
-    await page.goto(START_URL).catch(() => {});
+    await this.store.update(id, { lastOpenedAt: new Date().toISOString() });
+    await page.goto(profile.startUrl || DEFAULT_START_URL).catch(() => {});
 
     this.emit('status-changed', id, true);
+  }
+
+  /** Launch the profile if needed, then navigate its window to `url`
+   *  (used by the "Test fingerprint" button). */
+  async openUrl(id: string, url: string): Promise<void> {
+    if (!this.running.has(id)) await this.launch(id);
+    const ctx = this.running.get(id);
+    if (!ctx) throw new Error('Browser not running');
+    const page = ctx.pages()[0] ?? (await ctx.newPage());
+    await page.bringToFront().catch(() => {});
+    await page.goto(url).catch(() => {});
   }
 
   async stop(id: string): Promise<void> {

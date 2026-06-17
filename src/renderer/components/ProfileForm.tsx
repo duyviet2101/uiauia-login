@@ -1,10 +1,21 @@
 import { useState } from 'react';
-import type { CreateProfileInput, ProxyConfig, ProxyTestResult } from '../../main/types';
+import type { Profile, ProxyConfig, ProxyTestResult, FingerprintPlatform } from '../../main/types';
 import { api } from '../api';
 import { Spinner } from './Spinner';
 
+export interface ProfileFormValues {
+  name: string;
+  platform: FingerprintPlatform;
+  proxy: ProxyConfig | null;
+  geoip: boolean;
+  timezone: string | null;
+  locale: string | null;
+  startUrl: string | null;
+}
+
 interface Props {
-  onSubmit: (input: CreateProfileInput) => Promise<void> | void;
+  initial?: Profile;
+  onSubmit: (values: ProfileFormValues) => Promise<void> | void;
   onCancel: () => void;
 }
 
@@ -12,14 +23,20 @@ const inputCls =
   'w-full rounded-lg bg-slate-700 px-2.5 py-1.5 text-sm text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/70';
 const labelCls = 'block text-xs font-medium text-slate-400 mb-1';
 
-export function ProfileForm({ onSubmit, onCancel }: Props) {
-  const [name, setName] = useState('');
-  const [useProxy, setUseProxy] = useState(false);
-  const [proxyType, setProxyType] = useState<'http' | 'socks5'>('http');
-  const [host, setHost] = useState('');
-  const [port, setPort] = useState('');
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
+export function ProfileForm({ initial, onSubmit, onCancel }: Props) {
+  const editing = !!initial;
+  const [name, setName] = useState(initial?.name ?? '');
+  const [platform, setPlatform] = useState<FingerprintPlatform>(initial?.platform ?? 'windows');
+  const [useProxy, setUseProxy] = useState(!!initial?.proxy);
+  const [proxyType, setProxyType] = useState<'http' | 'socks5'>(initial?.proxy?.type ?? 'http');
+  const [host, setHost] = useState(initial?.proxy?.host ?? '');
+  const [port, setPort] = useState(initial?.proxy ? String(initial.proxy.port) : '');
+  const [username, setUsername] = useState(initial?.proxy?.username ?? '');
+  const [password, setPassword] = useState(initial?.proxy?.password ?? '');
+  const [geoip, setGeoip] = useState(initial?.geoip ?? true);
+  const [timezone, setTimezone] = useState(initial?.timezone ?? '');
+  const [locale, setLocale] = useState(initial?.locale ?? '');
+  const [startUrl, setStartUrl] = useState(initial?.startUrl ?? '');
 
   const [submitting, setSubmitting] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -55,7 +72,15 @@ export function ProfileForm({ onSubmit, onCancel }: Props) {
     if (submitting) return;
     setSubmitting(true);
     try {
-      await onSubmit({ name: name.trim(), proxy: buildProxy(), geoip: useProxy });
+      await onSubmit({
+        name: name.trim(),
+        platform,
+        proxy: buildProxy(),
+        geoip,
+        timezone: timezone.trim() || null,
+        locale: locale.trim() || null,
+        startUrl: startUrl.trim() || null,
+      });
     } finally {
       setSubmitting(false);
     }
@@ -67,9 +92,9 @@ export function ProfileForm({ onSubmit, onCancel }: Props) {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
       <form
         onSubmit={handleSubmit}
-        className="w-full max-w-md space-y-4 rounded-xl bg-slate-800 p-6 shadow-2xl ring-1 ring-slate-700"
+        className="max-h-[90vh] w-full max-w-md space-y-4 overflow-y-auto rounded-xl bg-slate-800 p-6 shadow-2xl ring-1 ring-slate-700"
       >
-        <h2 className="text-lg font-semibold text-white">Tạo profile mới</h2>
+        <h2 className="text-lg font-semibold text-white">{editing ? 'Sửa profile' : 'Tạo profile mới'}</h2>
 
         <div>
           <label className={labelCls}>Tên profile *</label>
@@ -81,6 +106,14 @@ export function ProfileForm({ onSubmit, onCancel }: Props) {
             autoFocus
             placeholder="Facebook acc 1"
           />
+        </div>
+
+        <div>
+          <label className={labelCls}>Hệ điều hành giả lập</label>
+          <select className={inputCls} value={platform} onChange={(e) => setPlatform(e.target.value as FingerprintPlatform)}>
+            <option value="windows">Windows (đa dạng, ẩn máy thật — khuyên dùng)</option>
+            <option value="macos">macOS (giống máy Mac thật — ít biến thiên)</option>
+          </select>
         </div>
 
         <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer select-none">
@@ -101,11 +134,7 @@ export function ProfileForm({ onSubmit, onCancel }: Props) {
             <div className="flex gap-2">
               <div className="w-24">
                 <label className={labelCls}>Loại</label>
-                <select
-                  className={inputCls}
-                  value={proxyType}
-                  onChange={(e) => setProxyType(e.target.value as 'http' | 'socks5')}
-                >
+                <select className={inputCls} value={proxyType} onChange={(e) => setProxyType(e.target.value as 'http' | 'socks5')}>
                   <option value="http">HTTP</option>
                   <option value="socks5">SOCKS5</option>
                 </select>
@@ -115,10 +144,7 @@ export function ProfileForm({ onSubmit, onCancel }: Props) {
                 <input
                   className={inputCls}
                   value={host}
-                  onChange={(e) => {
-                    setHost(e.target.value);
-                    setTestResult(null);
-                  }}
+                  onChange={(e) => { setHost(e.target.value); setTestResult(null); }}
                   placeholder="1.2.3.4"
                   required={useProxy}
                 />
@@ -129,10 +155,7 @@ export function ProfileForm({ onSubmit, onCancel }: Props) {
                   className={inputCls}
                   type="number"
                   value={port}
-                  onChange={(e) => {
-                    setPort(e.target.value);
-                    setTestResult(null);
-                  }}
+                  onChange={(e) => { setPort(e.target.value); setTestResult(null); }}
                   placeholder="1080"
                   required={useProxy}
                 />
@@ -141,24 +164,18 @@ export function ProfileForm({ onSubmit, onCancel }: Props) {
             <div className="flex gap-2">
               <div className="flex-1">
                 <label className={labelCls}>Username</label>
-                <input
-                  className={inputCls}
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  placeholder="(tuỳ chọn)"
-                />
+                <input className={inputCls} value={username} onChange={(e) => setUsername(e.target.value)} placeholder="(tuỳ chọn)" />
               </div>
               <div className="flex-1">
                 <label className={labelCls}>Password</label>
-                <input
-                  className={inputCls}
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="(tuỳ chọn)"
-                />
+                <input className={inputCls} type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="(tuỳ chọn)" />
               </div>
             </div>
+
+            <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer select-none">
+              <input type="checkbox" className="accent-blue-500" checked={geoip} onChange={(e) => setGeoip(e.target.checked)} />
+              geoip — tự khớp timezone &amp; ngôn ngữ theo IP của proxy
+            </label>
 
             <div className="flex items-center gap-3">
               <button
@@ -172,21 +189,31 @@ export function ProfileForm({ onSubmit, onCancel }: Props) {
               </button>
               {testResult && (
                 <span className={`text-xs ${testResult.ok ? 'text-emerald-400' : 'text-red-400'}`}>
-                  {testResult.ok
-                    ? `OK · IP ${testResult.ip} · ${testResult.latencyMs}ms`
-                    : `Lỗi: ${testResult.error}`}
+                  {testResult.ok ? `OK · IP ${testResult.ip} · ${testResult.latencyMs}ms` : `Lỗi: ${testResult.error}`}
                 </span>
               )}
             </div>
           </div>
         )}
 
+        <div className="flex gap-2">
+          <div className="flex-1">
+            <label className={labelCls}>Timezone (đè geoip)</label>
+            <input className={inputCls} value={timezone} onChange={(e) => setTimezone(e.target.value)} placeholder="Asia/Ho_Chi_Minh" />
+          </div>
+          <div className="flex-1">
+            <label className={labelCls}>Ngôn ngữ (đè geoip)</label>
+            <input className={inputCls} value={locale} onChange={(e) => setLocale(e.target.value)} placeholder="en-US" />
+          </div>
+        </div>
+
+        <div>
+          <label className={labelCls}>Trang khởi đầu</label>
+          <input className={inputCls} value={startUrl} onChange={(e) => setStartUrl(e.target.value)} placeholder="https://www.google.com (mặc định)" />
+        </div>
+
         <div className="flex justify-end gap-2 pt-1">
-          <button
-            type="button"
-            onClick={onCancel}
-            className="rounded-lg bg-slate-600 px-4 py-1.5 text-sm text-white hover:bg-slate-500 transition-colors"
-          >
+          <button type="button" onClick={onCancel} className="rounded-lg bg-slate-600 px-4 py-1.5 text-sm text-white hover:bg-slate-500 transition-colors">
             Huỷ
           </button>
           <button
@@ -195,7 +222,7 @@ export function ProfileForm({ onSubmit, onCancel }: Props) {
             className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             {submitting && <Spinner size={12} />}
-            {submitting ? 'Đang tạo…' : 'Tạo'}
+            {submitting ? 'Đang lưu…' : editing ? 'Lưu' : 'Tạo'}
           </button>
         </div>
       </form>

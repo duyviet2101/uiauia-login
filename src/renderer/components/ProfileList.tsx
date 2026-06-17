@@ -9,17 +9,22 @@ interface Props {
   busy: Set<string>;
   onLaunch: (id: string) => void;
   onStop: (id: string) => void;
+  onTest: (id: string) => void;
+  onEdit: (id: string) => void;
   onDuplicate: (id: string) => void;
+  onRegenerateSeed: (id: string) => void;
   onDelete: (id: string) => void;
 }
 
 function formatLastOpened(iso: string | null): string {
   if (!iso) return 'Chưa mở lần nào';
-  const d = new Date(iso);
-  return `Mở gần nhất: ${d.toLocaleString('vi-VN')}`;
+  return `Mở gần nhất: ${new Date(iso).toLocaleString('vi-VN')}`;
 }
 
-export function ProfileList({ profiles, warnings, busy, onLaunch, onStop, onDuplicate, onDelete }: Props) {
+export function ProfileList({
+  profiles, warnings, busy,
+  onLaunch, onStop, onTest, onEdit, onDuplicate, onRegenerateSeed, onDelete,
+}: Props) {
   const [expanded, setExpanded] = useState<string | null>(null);
 
   const warnMap = new Map<string, ProxyWarning[]>();
@@ -46,25 +51,21 @@ export function ProfileList({ profiles, warnings, busy, onLaunch, onStop, onDupl
         const isOpen = expanded === p.id;
         const isBusy = busy.has(p.id);
         return (
-          <div
-            key={p.id}
-            className="rounded-xl bg-slate-800 p-4 ring-1 ring-slate-700/60 transition-colors hover:ring-slate-600"
-          >
+          <div key={p.id} className="rounded-xl bg-slate-800 p-4 ring-1 ring-slate-700/60 transition-colors hover:ring-slate-600">
             <div className="flex items-center gap-3">
               <span
-                className={`h-2.5 w-2.5 flex-shrink-0 rounded-full ${
-                  p.running ? 'bg-emerald-400 shadow-[0_0_8px] shadow-emerald-400/60' : 'bg-slate-600'
-                }`}
+                className={`h-2.5 w-2.5 flex-shrink-0 rounded-full ${p.running ? 'bg-emerald-400 shadow-[0_0_8px] shadow-emerald-400/60' : 'bg-slate-600'}`}
                 title={p.running ? 'Đang chạy' : 'Đang tắt'}
               />
               <span className="flex-1 truncate font-medium text-white">{p.name}</span>
+              <span className="rounded bg-slate-700 px-1.5 py-0.5 text-[10px] font-medium uppercase text-slate-300">
+                {p.platform === 'macos' ? 'macOS' : 'Win'}
+              </span>
               {ws.map((w, i) => (
                 <span
                   key={i}
                   title={w.message}
-                  className={`rounded px-1.5 py-0.5 text-xs font-medium ${
-                    w.level === 'high' ? 'bg-red-900 text-red-200' : 'bg-amber-900 text-amber-200'
-                  }`}
+                  className={`rounded px-1.5 py-0.5 text-xs font-medium ${w.level === 'high' ? 'bg-red-900 text-red-200' : 'bg-amber-900 text-amber-200'}`}
                 >
                   {w.level === 'high' ? '⚠ Không proxy' : '⚠ Trùng IP'}
                 </span>
@@ -82,6 +83,12 @@ export function ProfileList({ profiles, warnings, busy, onLaunch, onStop, onDupl
               )}
               <span className="text-slate-600"> · {formatLastOpened(p.lastOpenedAt)}</span>
             </p>
+
+            {p.visitorId && (
+              <p className="mt-0.5 pl-5 text-xs text-slate-500">
+                FP ID: <span className="font-mono text-slate-400">{p.visitorId.slice(0, 16)}</span>
+              </p>
+            )}
 
             <div className="mt-3 flex flex-wrap gap-2 pl-5">
               {p.running ? (
@@ -103,6 +110,21 @@ export function ProfileList({ profiles, warnings, busy, onLaunch, onStop, onDupl
                   {isBusy ? 'Đang mở…' : 'Mở'}
                 </button>
               )}
+              <button
+                onClick={() => onTest(p.id)}
+                disabled={isBusy}
+                title="Mở trang kiểm tra fingerprint trong profile này"
+                className="rounded-lg bg-indigo-700 px-3 py-1 text-xs font-medium text-white hover:bg-indigo-600 disabled:opacity-60 transition-colors"
+              >
+                Test FP ↗
+              </button>
+              <button
+                onClick={() => onEdit(p.id)}
+                disabled={isBusy}
+                className="rounded-lg bg-slate-600 px-3 py-1 text-xs text-white hover:bg-slate-500 disabled:opacity-60 transition-colors"
+              >
+                Sửa
+              </button>
               <button
                 onClick={() => onDuplicate(p.id)}
                 disabled={isBusy}
@@ -128,7 +150,15 @@ export function ProfileList({ profiles, warnings, busy, onLaunch, onStop, onDupl
 
             {isOpen && (
               <div className="mt-2 pl-5 text-white">
-                <FingerprintPanel fingerprint={p.fingerprint} />
+                <FingerprintPanel fingerprint={p.fingerprint} visitorId={p.visitorId} platform={p.platform} />
+                <button
+                  onClick={() => onRegenerateSeed(p.id)}
+                  disabled={isBusy || p.running}
+                  title={p.running ? 'Dừng trước khi đổi seed' : 'Tạo danh tính fingerprint hoàn toàn mới'}
+                  className="mt-2 rounded-lg bg-slate-700 px-3 py-1 text-xs text-amber-300 hover:bg-slate-600 disabled:opacity-50 transition-colors"
+                >
+                  🔄 Đổi seed (danh tính mới)
+                </button>
               </div>
             )}
           </div>

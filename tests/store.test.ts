@@ -42,6 +42,32 @@ describe('ProfileStore', () => {
     expect(b.proxy).toEqual(a.proxy);
   });
 
+  it('regenerateSeed assigns new seed and clears cached fingerprint/visitorId', async () => {
+    const store = await makeStore();
+    const p = await store.create({ name: 'A' });
+    await store.update(p.id, {
+      fingerprint: {
+        userAgent: 'ua', platform: 'Win32', hardwareConcurrency: 8, deviceMemory: 8,
+        languages: ['en'], screen: { width: 1, height: 1, colorDepth: 24 }, devicePixelRatio: 1,
+        webglVendor: null, webglRenderer: null, timezone: 'UTC', webdriver: false, capturedAt: 'now',
+      },
+      visitorId: 'abc',
+    });
+    const before = store.get(p.id)!.seed;
+    const after = await store.regenerateSeed(p.id);
+    expect(after.seed).not.toBe(before);
+    expect(after.fingerprint).toBeNull();
+    expect(after.visitorId).toBeNull();
+  });
+
+  it('create applies platform/startUrl defaults', async () => {
+    const store = await makeStore();
+    const p = await store.create({ name: 'A' });
+    expect(p.platform).toBe('windows');
+    expect(p.startUrl).toBeNull();
+    expect(p.visitorId).toBeNull();
+  });
+
   it('remove deletes profile', async () => {
     const store = await makeStore();
     const p = await store.create({ name: 'A' });

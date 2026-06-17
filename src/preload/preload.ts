@@ -15,8 +15,10 @@ const api = {
   updateProfile: (id: string, patch: UpdateProfileInput) => ipcRenderer.invoke('profiles:update', id, patch),
   duplicateProfile: (id: string) => ipcRenderer.invoke('profiles:duplicate', id),
   deleteProfile: (id: string) => ipcRenderer.invoke('profiles:delete', id),
+  regenerateSeed: (id: string) => ipcRenderer.invoke('profiles:regenerate-seed', id),
   launch: (id: string) => ipcRenderer.invoke('browser:launch', id),
   stop: (id: string) => ipcRenderer.invoke('browser:stop', id),
+  openUrl: (id: string, url: string) => ipcRenderer.invoke('browser:open-url', id, url),
   testProxy: (proxy: ProxyConfig) => ipcRenderer.invoke('proxy:test', proxy),
   onStatusChanged: (cb: (p: { id: string; running: boolean }) => void) => {
     const handler = (_e: unknown, payload: { id: string; running: boolean }) => cb(payload);

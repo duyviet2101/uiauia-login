@@ -38,12 +38,15 @@ export class ProfileStore {
       id,
       name: input.name,
       seed: this.seedGen(),
+      platform: input.platform ?? 'windows',
       proxy: input.proxy ?? null,
       geoip: input.geoip ?? true,
       timezone: input.timezone ?? null,
       locale: input.locale ?? null,
+      startUrl: input.startUrl ?? null,
       userDataDir,
       fingerprint: null,
+      visitorId: null,
       createdAt: new Date().toISOString(),
       lastOpenedAt: null,
     };
@@ -64,11 +67,25 @@ export class ProfileStore {
     if (!src) throw new Error(`Profile not found: ${id}`);
     return this.create({
       name: `${src.name} (copy)`,
+      platform: src.platform,
       proxy: src.proxy,
       geoip: src.geoip,
       timezone: src.timezone,
       locale: src.locale,
+      startUrl: src.startUrl,
     });
+  }
+
+  /** Assign a fresh seed (= a brand-new device identity) and drop the cached
+   *  fingerprint/visitorId so they are re-probed on the next launch. */
+  async regenerateSeed(id: string): Promise<Profile> {
+    const p = this.get(id);
+    if (!p) throw new Error(`Profile not found: ${id}`);
+    p.seed = this.seedGen();
+    p.fingerprint = null;
+    p.visitorId = null;
+    await this.db.write();
+    return p;
   }
 
   async remove(id: string): Promise<void> {

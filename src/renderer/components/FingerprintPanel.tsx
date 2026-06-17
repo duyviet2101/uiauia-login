@@ -1,12 +1,20 @@
-import type { Fingerprint } from '../../main/types';
+import type { Fingerprint, FingerprintPlatform } from '../../main/types';
 
-interface Props { fingerprint: Fingerprint | null }
+interface Props {
+  fingerprint: Fingerprint | null;
+  visitorId?: string | null;
+  platform?: FingerprintPlatform;
+}
 
-export function FingerprintPanel({ fingerprint }: Props) {
-  if (!fingerprint) return (
-    <p className="text-xs text-gray-400 italic">Chưa có dữ liệu — khởi động profile để ghi nhận fingerprint.</p>
-  );
+export function FingerprintPanel({ fingerprint, visitorId, platform }: Props) {
+  if (!fingerprint) {
+    return (
+      <p className="text-xs text-gray-400 italic">Chưa có dữ liệu — khởi động profile để ghi nhận fingerprint.</p>
+    );
+  }
   const rows: [string, string][] = [
+    ['Spoof OS', platform === 'macos' ? 'macOS' : 'Windows'],
+    ['FingerprintJS ID', visitorId ?? 'chưa đo'],
     ['User Agent', fingerprint.userAgent],
     ['Platform', fingerprint.platform],
     ['CPU cores', String(fingerprint.hardwareConcurrency)],
@@ -24,7 +32,7 @@ export function FingerprintPanel({ fingerprint }: Props) {
       <tbody>
         {rows.map(([k, v]) => (
           <tr key={k} className="border-b border-gray-700">
-            <td className="pr-3 py-1 text-gray-400 font-medium whitespace-nowrap">{k}</td>
+            <td className="pr-3 py-1 text-gray-400 font-medium whitespace-nowrap align-top">{k}</td>
             <td className="py-1 break-all">{v}</td>
           </tr>
         ))}
