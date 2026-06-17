@@ -43,6 +43,4 @@ nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
 
-# Linux (optional, skip)
-linux:
-  skip: true
+# Linux intentionally omitted — only built when `electron-builder --linux` is run.
