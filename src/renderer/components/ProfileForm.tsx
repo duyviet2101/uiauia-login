@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { Profile, ProxyConfig, ProxyTestResult, FingerprintPlatform } from '../../main/types';
+import { parseProxyString } from '../../main/proxy-parse';
 import { api } from '../api';
 import { Spinner } from './Spinner';
 
@@ -38,9 +39,22 @@ export function ProfileForm({ initial, onSubmit, onCancel }: Props) {
   const [locale, setLocale] = useState(initial?.locale ?? '');
   const [startUrl, setStartUrl] = useState(initial?.startUrl ?? '');
 
+  const [quickPaste, setQuickPaste] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<ProxyTestResult | null>(null);
+
+  function applyQuickPaste(raw: string) {
+    setQuickPaste(raw);
+    const parsed = parseProxyString(raw);
+    if (!parsed) return;
+    setHost(parsed.host);
+    setPort(String(parsed.port));
+    setUsername(parsed.username ?? '');
+    setPassword(parsed.password ?? '');
+    if (parsed.type) setProxyType(parsed.type);
+    setTestResult(null);
+  }
 
   function buildProxy(): ProxyConfig | null {
     if (!useProxy || !host || !port) return null;
@@ -131,6 +145,15 @@ export function ProfileForm({ initial, onSubmit, onCancel }: Props) {
 
         {useProxy && (
           <div className="space-y-3 rounded-lg border-l-2 border-blue-600 bg-slate-900/40 p-3">
+            <div>
+              <label className={labelCls}>Dán nhanh — tự tách host:port:user:pass</label>
+              <input
+                className={inputCls}
+                value={quickPaste}
+                onChange={(e) => applyQuickPaste(e.target.value)}
+                placeholder="145.223.61.148:8180:username:password"
+              />
+            </div>
             <div className="flex gap-2">
               <div className="w-24">
                 <label className={labelCls}>Loại</label>
