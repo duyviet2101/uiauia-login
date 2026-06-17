@@ -1,5 +1,7 @@
 import type { ProfileRuntime, CreateProfileInput, UpdateProfileInput, ProxyConfig, ProxyTestResult, ProxyWarning } from '../main/types';
 
+if (!window.api) throw new Error('Preload bridge not injected — check preload path in main/index.ts');
+
 export const api = {
   list: (): Promise<ProfileRuntime[]> => window.api.listProfiles(),
   warnings: (): Promise<ProxyWarning[]> => window.api.warnings(),
