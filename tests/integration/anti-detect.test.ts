@@ -4,36 +4,39 @@ import { mkdtempSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 
-const TIMEOUT = 60_000;
+const TIMEOUT = 90_000;
 
 interface FP {
-  userAgent: string;
-  platform: string;
-  hardwareConcurrency: number;
-  timezone: string;
+  webglRenderer: string | null;
+  visitorId: string;
   webdriver: boolean;
 }
 
+// Mirror the production launch args (see src/main/launch-args.ts).
 async function launchAndProbe(seed: number, dataDir: string): Promise<FP> {
   const ctx = await launchPersistentContext({
     userDataDir: dataDir,
     headless: false,
-    args: [`--fingerprint=${seed}`],
+    stealthArgs: false,
+    args: [`--fingerprint=${seed}`, '--fingerprint-platform=windows', '--ignore-gpu-blocklist'],
   });
-  const page = await ctx.newPage();
-  await page.goto('about:blank');
-  const fp = await page.evaluate((): FP => ({
-    userAgent: navigator.userAgent,
-    platform: navigator.platform,
-    hardwareConcurrency: navigator.hardwareConcurrency,
-    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-    webdriver: navigator.webdriver,
-  }));
+  const page = ctx.pages()[0] ?? (await ctx.newPage());
+  await page.goto('https://example.com');
+  const fp = await page.evaluate(async (): Promise<FP> => {
+    const gl = document.createElement('canvas').getContext('webgl');
+    const dbg = gl?.getExtension('WEBGL_debug_renderer_info');
+    const webglRenderer = gl && dbg ? (gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) as string) : null;
+    // @ts-expect-error - remote ESM module loaded in the browser, no local types
+    const lib = await import('https://openfpcdn.io/fingerprintjs/v4');
+    const agent = await lib.load();
+    const { visitorId } = await agent.get();
+    return { webglRenderer, visitorId, webdriver: navigator.webdriver };
+  });
   await ctx.close();
   return fp;
 }
 
-describe('anti-detect: two profiles have distinct fingerprints', () => {
+describe('anti-detect: two profiles look like distinct devices', () => {
   let dir1: string;
   let dir2: string;
   let fp1: FP;
@@ -58,16 +61,11 @@ describe('anti-detect: two profiles have distinct fingerprints', () => {
     expect(fp2.webdriver).toBe(false);
   });
 
-  it('profiles have different user agents', () => {
-    expect(fp1.userAgent).not.toBe(fp2.userAgent);
+  it('profiles produce different WebGL renderers (seed-driven GPU)', () => {
+    expect(fp1.webglRenderer).not.toBe(fp2.webglRenderer);
   });
 
-  it('profiles differ in at least one fingerprint dimension', () => {
-    const different =
-      fp1.userAgent !== fp2.userAgent ||
-      fp1.platform !== fp2.platform ||
-      fp1.hardwareConcurrency !== fp2.hardwareConcurrency ||
-      fp1.timezone !== fp2.timezone;
-    expect(different).toBe(true);
+  it('FingerprintJS computes different visitor IDs (seen as different devices)', () => {
+    expect(fp1.visitorId).not.toBe(fp2.visitorId);
   });
 });

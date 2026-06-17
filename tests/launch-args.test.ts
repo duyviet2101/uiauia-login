@@ -28,6 +28,12 @@ describe('buildLaunchArgs', () => {
     expect(o.userDataDir).toBe('/data/p1');
     expect(o.args).toContain('--fingerprint=12345');
   });
+  it('forces windows platform and drops default stealth args (no --no-sandbox)', () => {
+    const o = buildLaunchArgs(profile());
+    expect(o.args).toContain('--fingerprint-platform=windows');
+    expect(o.stealthArgs).toBe(false);
+    expect(o.args).not.toContain('--no-sandbox');
+  });
   it('no proxy => no geoip, no webrtc flag', () => {
     const o = buildLaunchArgs(profile({ proxy: null }));
     expect(o.proxy).toBeUndefined();

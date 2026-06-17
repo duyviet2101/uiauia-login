@@ -9,13 +9,25 @@ export function toProxyUrl(p: ProxyConfig): string {
 }
 
 export function buildLaunchArgs(p: Profile): LaunchPersistentContextOptions {
-  const args = [`--fingerprint=${p.seed}`];
+  const args = [
+    `--fingerprint=${p.seed}`,
+    // Present as a common Windows desktop. On macOS the cloakbrowser default
+    // runs "native" (real UA/GPU shared across profiles); forcing windows makes
+    // the binary derive a varied UA/GPU per seed and hides the host machine.
+    '--fingerprint-platform=windows',
+    // Headed Chromium blocks WebGL on software GPUs without this.
+    '--ignore-gpu-blocklist',
+  ];
   // geoip=true auto-injects --fingerprint-webrtc-ip; only add manually when proxy exists but geoip is off.
   if (p.proxy && !p.geoip) args.push('--fingerprint-webrtc-ip=auto');
 
   return {
     userDataDir: p.userDataDir,
     headless: false,
+    // Drop cloakbrowser's default stealth args (which include --no-sandbox,
+    // unneeded on desktop and triggers Chrome's "unsupported flag" warning).
+    // The 58 C++ stealth patches live in the binary and stay active regardless.
+    stealthArgs: false,
     proxy: p.proxy ? toProxyUrl(p.proxy) : undefined,
     geoip: p.proxy ? p.geoip : false,
     timezone: p.timezone ?? undefined,
