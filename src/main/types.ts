@@ -62,3 +62,15 @@ export interface ProxyWarning {
   level: 'high' | 'medium';
   message: string;
 }
+
+export type InitPhase =
+  | 'starting'
+  | 'preparing-binary'
+  | 'starting-services'
+  | 'ready'
+  | 'error';
+
+export interface InitState {
+  phase: InitPhase;
+  message: string;
+}

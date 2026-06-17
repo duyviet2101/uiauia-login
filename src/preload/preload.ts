@@ -1,7 +1,14 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import type { CreateProfileInput, UpdateProfileInput, ProxyConfig } from '../main/types';
+import type { CreateProfileInput, UpdateProfileInput, ProxyConfig, InitState } from '../main/types';
 
 const api = {
+  getInitState: (): Promise<InitState> => ipcRenderer.invoke('app:get-init-state'),
+  onInitState: (cb: (s: InitState) => void) => {
+    const handler = (_e: unknown, s: InitState) => cb(s);
+    ipcRenderer.on('app:init-state', handler);
+    return () => ipcRenderer.removeListener('app:init-state', handler);
+  },
+
   listProfiles: () => ipcRenderer.invoke('profiles:list'),
   warnings: () => ipcRenderer.invoke('profiles:warnings'),
   createProfile: (input: CreateProfileInput) => ipcRenderer.invoke('profiles:create', input),
