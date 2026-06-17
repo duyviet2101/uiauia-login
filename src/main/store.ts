@@ -5,10 +5,13 @@ import { mkdirSync, rmSync } from 'fs';
 import { randomUUID } from 'crypto';
 import type { Profile, CreateProfileInput, UpdateProfileInput } from './types';
 
-interface Data { profiles: Profile[] }
+interface Data { profiles: Profile[]; version?: number }
 interface Opts { seedGen?: () => number; idGen?: () => string }
 
 const defaultSeed = () => Math.floor(Math.random() * 99_990_000) + 10_000;
+
+/** Bump when the Profile shape changes; `migrate()` backfills older records. */
+const SCHEMA_VERSION = 2;
 
 export class ProfileStore {
   private db!: Low<Data>;
@@ -25,6 +28,20 @@ export class ProfileStore {
     const adapter = new JSONFile<Data>(join(this.dataDir, 'cloak.json'));
     this.db = new Low<Data>(adapter, { profiles: [] });
     await this.db.read();
+    if (this.migrate()) await this.db.write();
+  }
+
+  /** Backfill fields added in newer versions onto profiles saved by older
+   *  builds, so existing data keeps working after an app update. */
+  private migrate(): boolean {
+    let changed = false;
+    for (const p of this.db.data.profiles as (Profile & Record<string, unknown>)[]) {
+      if (p.platform === undefined) { p.platform = 'windows'; changed = true; }
+      if (p.startUrl === undefined) { p.startUrl = null; changed = true; }
+      if (p.visitorId === undefined) { p.visitorId = null; changed = true; }
+    }
+    if (this.db.data.version !== SCHEMA_VERSION) { this.db.data.version = SCHEMA_VERSION; changed = true; }
+    return changed;
   }
 
   list(): Profile[] { return this.db.data.profiles; }

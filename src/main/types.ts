@@ -81,3 +81,11 @@ export interface InitState {
   phase: InitPhase;
   message: string;
 }
+
+export interface UpdateInfo {
+  current: string;
+  latest: string | null;
+  hasUpdate: boolean;
+  url: string | null;
+  error?: string;
+}

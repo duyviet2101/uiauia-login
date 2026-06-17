@@ -6,6 +6,7 @@ import type {
   ProxyTestResult,
   ProxyWarning,
   InitState,
+  UpdateInfo,
 } from '../main/types';
 
 const bridge = typeof window !== 'undefined' ? window.api : undefined;
@@ -23,6 +24,9 @@ function need() {
 export const api = {
   getInitState: (): Promise<InitState> => need().getInitState(),
   onInitState: (cb: (s: InitState) => void) => need().onInitState(cb),
+  getVersion: (): Promise<string> => need().getVersion(),
+  checkUpdate: (): Promise<UpdateInfo> => need().checkUpdate(),
+  openExternal: (url: string): Promise<void> => need().openExternal(url),
 
   list: (): Promise<ProfileRuntime[]> => need().listProfiles(),
   warnings: (): Promise<ProxyWarning[]> => need().warnings(),

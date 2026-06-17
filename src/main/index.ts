@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron';
 import { join } from 'path';
 import { ensureBinary, binaryInfo } from 'cloakbrowser';
 import { ProfileStore } from './store';
@@ -6,6 +6,7 @@ import { BrowserManager } from './browser-manager';
 import { ProxyTester } from './proxy-tester';
 import { registerIpc } from './ipc';
 import { clearQuarantine } from './quarantine';
+import { checkForUpdate } from './updater';
 import type { InitState } from './types';
 
 let initState: InitState = { phase: 'starting', message: 'Đang khởi động…' };
@@ -74,6 +75,9 @@ app.whenReady().then(async () => {
   // Always available so the renderer can query current state on mount,
   // even if it missed an earlier broadcast.
   ipcMain.handle('app:get-init-state', () => initState);
+  ipcMain.handle('app:get-version', () => app.getVersion());
+  ipcMain.handle('app:check-update', () => checkForUpdate());
+  ipcMain.handle('app:open-external', (_e, url: string) => shell.openExternal(url));
 
   try {
     setInitState({ phase: 'preparing-binary', message: 'Đang kiểm tra / tải trình duyệt CloakBrowser…' });

@@ -2,6 +2,16 @@ appId: com.cloakbrowser.manager
 productName: CloakBrowser Manager
 copyright: Copyright © 2026
 
+# Keep appId stable across versions so macOS/Windows preserve the user's data
+# directory (profiles + sessions) when a new build is installed over the old.
+
+# Where releases live. Used by `electron-builder --publish` to upload, and the
+# in-app update check reads the same repo's "latest release" tag.
+publish:
+  provider: github
+  owner: duyviet2101
+  repo: uiauia-login
+
 directories:
   output: dist
   buildResources: build

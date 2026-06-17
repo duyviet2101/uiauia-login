@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { ProfileRuntime, ProxyWarning, InitState } from '../main/types';
+import type { ProfileRuntime, ProxyWarning, InitState, UpdateInfo } from '../main/types';
 import { api, bridgeReady } from './api';
 import { ProfileList } from './components/ProfileList';
 import { ProfileForm, type ProfileFormValues } from './components/ProfileForm';
 import { StartupScreen } from './components/StartupScreen';
 import { ConfirmDialog } from './components/ConfirmDialog';
+import { UpdateBanner } from './components/UpdateBanner';
 import { ToastContainer, type ToastItem, type ToastKind } from './components/Toast';
 
 const TEST_FP_URL = 'https://browserleaks.com/canvas';
@@ -23,6 +24,9 @@ export default function App() {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [pendingDelete, setPendingDelete] = useState<ProfileRuntime | null>(null);
   const [pendingReseed, setPendingReseed] = useState<ProfileRuntime | null>(null);
+  const [version, setVersion] = useState('');
+  const [update, setUpdate] = useState<UpdateInfo | null>(null);
+  const [updateDismissed, setUpdateDismissed] = useState(false);
 
   const dismissToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
@@ -62,6 +66,8 @@ export default function App() {
   useEffect(() => {
     if (init.phase !== 'ready') return;
     refresh().catch((e) => addToast('error', String(e instanceof Error ? e.message : e)));
+    api.getVersion().then(setVersion).catch(() => {});
+    api.checkUpdate().then(setUpdate).catch(() => {});
     const unsub = api.onStatusChanged(({ id, running }) => {
       setProfiles((prev) => prev.map((p) => (p.id === id ? { ...p, running } : p)));
     });
@@ -143,13 +149,24 @@ export default function App() {
       <div className="mx-auto max-w-2xl space-y-6 p-6">
         <header className="flex items-center justify-between">
           <div>
-            <h1 className="text-xl font-bold tracking-tight">CloakBrowser Manager</h1>
+            <h1 className="text-xl font-bold tracking-tight">
+              CloakBrowser Manager
+              {version && <span className="ml-2 align-middle text-xs font-normal text-slate-500">v{version}</span>}
+            </h1>
             <p className="text-xs text-slate-400">{profiles.length} profile · {runningCount} đang chạy</p>
           </div>
           <button onClick={openCreate} className="rounded-lg bg-blue-600 px-4 py-1.5 text-sm font-medium hover:bg-blue-500 transition-colors">
             + Tạo profile
           </button>
         </header>
+
+        {update?.hasUpdate && !updateDismissed && (
+          <UpdateBanner
+            info={update}
+            onDownload={() => update.url && api.openExternal(update.url)}
+            onDismiss={() => setUpdateDismissed(true)}
+          />
+        )}
 
         <ProfileList
           profiles={profiles}
