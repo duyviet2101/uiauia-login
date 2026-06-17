@@ -4,6 +4,8 @@ interface Props {
   confirmLabel?: string;
   cancelLabel?: string;
   danger?: boolean;
+  /** Optional third button shown to the left of cancel (e.g. a safer path). */
+  tertiary?: { label: string; onClick: () => void };
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -14,6 +16,7 @@ export function ConfirmDialog({
   confirmLabel = 'Xác nhận',
   cancelLabel = 'Huỷ',
   danger = false,
+  tertiary,
   onConfirm,
   onCancel,
 }: Props) {
@@ -28,7 +31,15 @@ export function ConfirmDialog({
       >
         <h2 className="text-base font-semibold text-white">{title}</h2>
         <p className="mt-2 text-sm text-slate-300 leading-relaxed">{message}</p>
-        <div className="mt-5 flex justify-end gap-2">
+        <div className="mt-5 flex flex-wrap justify-end gap-2">
+          {tertiary && (
+            <button
+              onClick={tertiary.onClick}
+              className="mr-auto rounded-lg bg-emerald-700 px-4 py-1.5 text-sm font-medium text-white hover:bg-emerald-600 transition-colors"
+            >
+              {tertiary.label}
+            </button>
+          )}
           <button
             onClick={onCancel}
             className="rounded-lg bg-slate-600 px-4 py-1.5 text-sm text-white hover:bg-slate-500 transition-colors"

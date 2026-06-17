@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { ProfileRuntime, ProxyWarning, InitState, UpdateInfo } from '../main/types';
+import type { ProfileRuntime, ProxyWarning, InitState, UpdateInfo, IdentityDrift } from '../main/types';
 import { api, bridgeReady } from './api';
 import { ProfileList } from './components/ProfileList';
 import { ProfileForm, type ProfileFormValues } from './components/ProfileForm';
@@ -24,6 +24,8 @@ export default function App() {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [pendingDelete, setPendingDelete] = useState<ProfileRuntime | null>(null);
   const [pendingReseed, setPendingReseed] = useState<ProfileRuntime | null>(null);
+  const [pendingIdentityReset, setPendingIdentityReset] = useState<ProfileRuntime | null>(null);
+  const [pendingIdentityDrift, setPendingIdentityDrift] = useState<{ profile: ProfileRuntime; drift: IdentityDrift[] } | null>(null);
   const [version, setVersion] = useState('');
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
   const [updateDismissed, setUpdateDismissed] = useState(false);
@@ -84,7 +86,7 @@ export default function App() {
   async function handleSubmit(values: ProfileFormValues) {
     try {
       if (editing) {
-        await api.update(editing.id, values);
+        await api.update(editing.id, editing.identityLocked ? { name: values.name, startUrl: values.startUrl } : values);
         addToast('success', `Đã lưu “${values.name}”.`);
       } else {
         await api.create(values);
@@ -109,7 +111,34 @@ export default function App() {
     }
   }
 
-  const handleLaunch = (id: string) => withBusy(id, async () => { await api.launch(id); await refresh(); }, 'Không mở được');
+  function parseIdentityDriftError(e: unknown): IdentityDrift[] | null {
+    const msg = e instanceof Error ? e.message : String(e);
+    const marker = 'IDENTITY_DRIFT_BLOCKED:';
+    const idx = msg.indexOf(marker);
+    if (idx === -1) return null;
+    try {
+      return JSON.parse(msg.slice(idx + marker.length)) as IdentityDrift[];
+    } catch {
+      return [];
+    }
+  }
+
+  const handleLaunch = (id: string) => withBusy(id, async () => {
+    try {
+      const result = await api.launch(id);
+      if (result.lockedNow) addToast('success', 'Identity locked for this profile.');
+      await refresh();
+    } catch (e) {
+      const drift = parseIdentityDriftError(e);
+      if (drift) {
+        const profile = profiles.find((p) => p.id === id);
+        if (profile) setPendingIdentityDrift({ profile, drift });
+        else addToast('error', 'Identity drift blocked.');
+        return;
+      }
+      throw e;
+    }
+  }, 'Không mở được');
   const handleStop = (id: string) => withBusy(id, async () => { await api.stop(id); await refresh(); }, 'Không dừng được');
   const handleTest = (id: string) =>
     withBusy(id, async () => { await api.openUrl(id, TEST_FP_URL); addToast('info', 'Đã mở trang kiểm tra fingerprint.'); }, 'Không mở trang test được');
@@ -136,6 +165,27 @@ export default function App() {
       await refresh();
       addToast('success', 'Đã tạo danh tính mới. Mở lại profile để ghi nhận fingerprint mới.');
     }, 'Lỗi đổi seed');
+  }
+
+  async function forceLaunchAcceptingIp(target: ProfileRuntime | null) {
+    if (!target) return;
+    setPendingIdentityDrift(null);
+    await withBusy(target.id, async () => {
+      await api.forceLaunch(target.id);
+      await refresh();
+      addToast('success', 'Đã mở và cập nhật IP/identity đã khoá theo môi trường hiện tại.');
+    }, 'Không mở được');
+  }
+
+  async function confirmResetIdentity(target: ProfileRuntime | null) {
+    if (!target) return;
+    setPendingIdentityReset(null);
+    setPendingIdentityDrift(null);
+    await withBusy(target.id, async () => {
+      await api.resetIdentity(target.id);
+      await refresh();
+      addToast('success', 'Identity đã được reset. Lần mở kế tiếp với proxy hợp lệ sẽ khoá identity mới.');
+    }, 'Lỗi reset identity');
   }
 
   if (init.phase !== 'ready') {
@@ -178,6 +228,7 @@ export default function App() {
           onEdit={openEdit}
           onDuplicate={handleDuplicate}
           onRegenerateSeed={(id) => setPendingReseed(profiles.find((p) => p.id === id) ?? null)}
+          onResetIdentity={(id) => setPendingIdentityReset(profiles.find((p) => p.id === id) ?? null)}
           onDelete={(id) => setPendingDelete(profiles.find((p) => p.id === id) ?? null)}
         />
       </div>
@@ -209,6 +260,32 @@ export default function App() {
           danger
           onConfirm={confirmReseed}
           onCancel={() => setPendingReseed(null)}
+        />
+      )}
+
+      {pendingIdentityReset && (
+        <ConfirmDialog
+          title="Reset identity"
+          message={`Reset identity cho “${pendingIdentityReset.name}”? Fingerprint snapshot và lock hiện tại sẽ bị xoá, nhưng cookie và dữ liệu phiên vẫn được giữ.`}
+          confirmLabel="Reset identity"
+          danger
+          onConfirm={() => confirmResetIdentity(pendingIdentityReset)}
+          onCancel={() => setPendingIdentityReset(null)}
+        />
+      )}
+
+      {pendingIdentityDrift && (
+        <ConfirmDialog
+          title="Identity drift blocked"
+          message={`Không mở “${pendingIdentityDrift.profile.name}” vì identity đã khoá bị lệch: ${pendingIdentityDrift.drift.map((d) => `${d.field} expected ${d.expected ?? 'null'} got ${d.actual ?? 'null'}`).join('; ')}.
+
+• “Mở & cập nhật IP”: giữ nguyên seed/fingerprint/cookie, chỉ cập nhật IP/phiên bản đã khoá theo hiện tại (dùng khi proxy chỉ đổi IP).
+• “Reset identity”: xoá fingerprint đã khoá và tạo danh tính mới (chỉ dùng khi thực sự muốn đổi thiết bị).`}
+          confirmLabel="Reset identity"
+          danger
+          tertiary={{ label: 'Mở & cập nhật IP', onClick: () => forceLaunchAcceptingIp(pendingIdentityDrift.profile) }}
+          onConfirm={() => confirmResetIdentity(pendingIdentityDrift.profile)}
+          onCancel={() => setPendingIdentityDrift(null)}
         />
       )}
 

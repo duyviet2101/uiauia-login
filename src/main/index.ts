@@ -5,6 +5,7 @@ import { ProfileStore } from './store';
 import { BrowserManager } from './browser-manager';
 import { ProxyTester } from './proxy-tester';
 import { registerIpc } from './ipc';
+import { IdentityService } from './identity-service';
 import { clearQuarantine } from './quarantine';
 import { checkForUpdate } from './updater';
 import type { InitState } from './types';
@@ -66,6 +67,8 @@ function createWindow(): BrowserWindow {
 }
 
 app.whenReady().then(async () => {
+  process.env.CLOAKBROWSER_AUTO_UPDATE = 'false';
+
   // Window opens immediately and shows the startup screen while services boot.
   createWindow();
   app.on('activate', () => {
@@ -93,9 +96,10 @@ app.whenReady().then(async () => {
     setInitState({ phase: 'starting-services', message: 'Đang khởi tạo dịch vụ…' });
     const store = new ProfileStore(app.getPath('userData'));
     await store.init();
-    const manager = new BrowserManager(store);
     const proxyTester = new ProxyTester();
-    registerIpc(store, manager, proxyTester);
+    const identityService = new IdentityService(proxyTester);
+    const manager = new BrowserManager(store, undefined, undefined, undefined, identityService);
+    registerIpc(store, manager, proxyTester, identityService);
 
     setInitState({ phase: 'ready', message: '' });
   } catch (err) {

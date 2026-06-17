@@ -26,9 +26,10 @@ const labelCls = 'block text-xs font-medium text-slate-400 mb-1';
 
 export function ProfileForm({ initial, onSubmit, onCancel }: Props) {
   const editing = !!initial;
+  const identityLocked = !!initial?.identityLocked;
   const [name, setName] = useState(initial?.name ?? '');
   const [platform, setPlatform] = useState<FingerprintPlatform>(initial?.platform ?? 'windows');
-  const [useProxy, setUseProxy] = useState(!!initial?.proxy);
+  const [useProxy, setUseProxy] = useState(initial ? !!initial.proxy : true);
   const [proxyType, setProxyType] = useState<'http' | 'socks5'>(initial?.proxy?.type ?? 'http');
   const [host, setHost] = useState(initial?.proxy?.host ?? '');
   const [port, setPort] = useState(initial?.proxy ? String(initial.proxy.port) : '');
@@ -124,10 +125,11 @@ export function ProfileForm({ initial, onSubmit, onCancel }: Props) {
 
         <div>
           <label className={labelCls}>Hệ điều hành giả lập</label>
-          <select className={inputCls} value={platform} onChange={(e) => setPlatform(e.target.value as FingerprintPlatform)}>
+          <select className={inputCls} value={platform} disabled={identityLocked} onChange={(e) => setPlatform(e.target.value as FingerprintPlatform)}>
             <option value="windows">Windows (đa dạng, ẩn máy thật — khuyên dùng)</option>
             <option value="macos">macOS (giống máy Mac thật — ít biến thiên)</option>
           </select>
+          {identityLocked && <p className="mt-1 text-[11px] text-amber-300">Identity đã khoá. Reset identity trước khi đổi fingerprint/proxy.</p>}
         </div>
 
         <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer select-none">
@@ -135,6 +137,7 @@ export function ProfileForm({ initial, onSubmit, onCancel }: Props) {
             type="checkbox"
             className="accent-blue-500"
             checked={useProxy}
+            disabled={identityLocked}
             onChange={(e) => {
               setUseProxy(e.target.checked);
               setTestResult(null);
@@ -150,6 +153,7 @@ export function ProfileForm({ initial, onSubmit, onCancel }: Props) {
               <input
                 className={inputCls}
                 value={quickPaste}
+                disabled={identityLocked}
                 onChange={(e) => applyQuickPaste(e.target.value)}
                 placeholder="145.223.61.148:8180:username:password"
               />
@@ -157,7 +161,7 @@ export function ProfileForm({ initial, onSubmit, onCancel }: Props) {
             <div className="flex gap-2">
               <div className="w-24">
                 <label className={labelCls}>Loại</label>
-                <select className={inputCls} value={proxyType} onChange={(e) => setProxyType(e.target.value as 'http' | 'socks5')}>
+                <select className={inputCls} value={proxyType} disabled={identityLocked} onChange={(e) => setProxyType(e.target.value as 'http' | 'socks5')}>
                   <option value="http">HTTP</option>
                   <option value="socks5">SOCKS5</option>
                 </select>
@@ -167,6 +171,7 @@ export function ProfileForm({ initial, onSubmit, onCancel }: Props) {
                 <input
                   className={inputCls}
                   value={host}
+                  disabled={identityLocked}
                   onChange={(e) => { setHost(e.target.value); setTestResult(null); }}
                   placeholder="1.2.3.4"
                   required={useProxy}
@@ -178,6 +183,7 @@ export function ProfileForm({ initial, onSubmit, onCancel }: Props) {
                   className={inputCls}
                   type="number"
                   value={port}
+                  disabled={identityLocked}
                   onChange={(e) => { setPort(e.target.value); setTestResult(null); }}
                   placeholder="1080"
                   required={useProxy}
@@ -187,16 +193,16 @@ export function ProfileForm({ initial, onSubmit, onCancel }: Props) {
             <div className="flex gap-2">
               <div className="flex-1">
                 <label className={labelCls}>Username</label>
-                <input className={inputCls} value={username} onChange={(e) => setUsername(e.target.value)} placeholder="(tuỳ chọn)" />
+                <input className={inputCls} value={username} disabled={identityLocked} onChange={(e) => setUsername(e.target.value)} placeholder="(tuỳ chọn)" />
               </div>
               <div className="flex-1">
                 <label className={labelCls}>Password</label>
-                <input className={inputCls} type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="(tuỳ chọn)" />
+                <input className={inputCls} type="password" value={password} disabled={identityLocked} onChange={(e) => setPassword(e.target.value)} placeholder="(tuỳ chọn)" />
               </div>
             </div>
 
             <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer select-none">
-              <input type="checkbox" className="accent-blue-500" checked={geoip} onChange={(e) => setGeoip(e.target.checked)} />
+              <input type="checkbox" className="accent-blue-500" checked={geoip} disabled={identityLocked} onChange={(e) => setGeoip(e.target.checked)} />
               geoip — tự khớp timezone &amp; ngôn ngữ theo IP của proxy
             </label>
 
@@ -204,7 +210,7 @@ export function ProfileForm({ initial, onSubmit, onCancel }: Props) {
               <button
                 type="button"
                 onClick={handleTestProxy}
-                disabled={!canTest}
+                disabled={!canTest || identityLocked}
                 className="inline-flex items-center gap-1.5 rounded-lg bg-slate-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 {testing && <Spinner size={12} />}
@@ -222,11 +228,11 @@ export function ProfileForm({ initial, onSubmit, onCancel }: Props) {
         <div className="flex gap-2">
           <div className="flex-1">
             <label className={labelCls}>Timezone (đè geoip)</label>
-            <input className={inputCls} value={timezone} onChange={(e) => setTimezone(e.target.value)} placeholder="Asia/Ho_Chi_Minh" />
+            <input className={inputCls} value={timezone} disabled={identityLocked} onChange={(e) => setTimezone(e.target.value)} placeholder="Asia/Ho_Chi_Minh" />
           </div>
           <div className="flex-1">
             <label className={labelCls}>Ngôn ngữ (đè geoip)</label>
-            <input className={inputCls} value={locale} onChange={(e) => setLocale(e.target.value)} placeholder="en-US" />
+            <input className={inputCls} value={locale} disabled={identityLocked} onChange={(e) => setLocale(e.target.value)} placeholder="en-US" />
           </div>
         </div>
 

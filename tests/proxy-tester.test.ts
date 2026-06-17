@@ -3,6 +3,16 @@ import { ProxyTester } from '../src/main/proxy-tester';
 import type { ProxyConfig } from '../src/main/types';
 
 const proxy: ProxyConfig = { type: 'http', host: 'h', port: 80 };
+const fakeFetch = vi.fn(async () => ({
+  ok: true,
+  json: async () => ({
+    success: true,
+    country: 'United States',
+    city: 'New York',
+    timezone: { id: 'America/New_York' },
+    connection: { asn: 123, isp: 'ISP' },
+  }),
+})) as any;
 
 function fakeBrowser(body: string, throwOn?: 'launch' | 'goto') {
   const page = {
@@ -19,10 +29,13 @@ function fakeBrowser(body: string, throwOn?: 'launch' | 'goto') {
 
 describe('ProxyTester', () => {
   it('returns ok with ip parsed from response', async () => {
-    const tester = new ProxyTester(fakeBrowser('{"ip":"9.9.9.9"}') as any);
+    const tester = new ProxyTester(fakeBrowser('{"ip":"9.9.9.9"}') as any, fakeFetch);
     const r = await tester.test(proxy);
     expect(r.ok).toBe(true);
     expect(r.ip).toBe('9.9.9.9');
+    expect(r.exitIp).toBe('9.9.9.9');
+    expect(r.timezone).toBe('America/New_York');
+    expect(r.asn).toBe('123');
     expect(typeof r.latencyMs).toBe('number');
   });
 

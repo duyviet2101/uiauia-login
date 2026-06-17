@@ -3,12 +3,15 @@ import type { ProfileStore } from './store';
 import type { BrowserManager } from './browser-manager';
 import type { ProxyTester } from './proxy-tester';
 import { proxyWarnings } from './unlinkability';
+import { IdentityService } from './identity-service';
 import type { CreateProfileInput, UpdateProfileInput, ProxyConfig, ProfileRuntime } from './types';
+import { IdentityDriftError } from './types';
 
 export function registerIpc(
   store: ProfileStore,
   manager: BrowserManager,
   proxyTester: ProxyTester,
+  identityService: IdentityService = new IdentityService(proxyTester),
 ) {
   const withRuntime = (): ProfileRuntime[] =>
     store.list().map((p) => ({ ...p, running: manager.isRunning(p.id) }));
@@ -20,8 +23,24 @@ export function registerIpc(
   ipcMain.handle('profiles:duplicate', (_e, id: string) => store.duplicate(id));
   ipcMain.handle('profiles:delete', (_e, id: string) => store.remove(id));
   ipcMain.handle('profiles:regenerate-seed', (_e, id: string) => store.regenerateSeed(id));
+  ipcMain.handle('profiles:reset-identity', (_e, id: string) => store.resetIdentity(id));
+  ipcMain.handle('profiles:preflight-identity', (_e, id: string) => {
+    const p = store.get(id);
+    if (!p) throw new Error(`Profile not found: ${id}`);
+    return identityService.checkLockedIdentity(p);
+  });
 
-  ipcMain.handle('browser:launch', (_e, id: string) => manager.launch(id));
+  ipcMain.handle('browser:launch', async (_e, id: string) => {
+    try {
+      return await manager.launch(id);
+    } catch (e) {
+      if (e instanceof IdentityDriftError) {
+        throw new Error(`IDENTITY_DRIFT_BLOCKED:${JSON.stringify(e.drift)}`);
+      }
+      throw e;
+    }
+  });
+  ipcMain.handle('browser:force-launch', (_e, id: string) => manager.forceLaunch(id));
   ipcMain.handle('browser:stop', (_e, id: string) => manager.stop(id));
   ipcMain.handle('browser:running', () => manager.runningIds());
   ipcMain.handle('browser:open-url', (_e, id: string, url: string) => manager.openUrl(id, url));

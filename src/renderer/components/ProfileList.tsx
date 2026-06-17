@@ -13,6 +13,7 @@ interface Props {
   onEdit: (id: string) => void;
   onDuplicate: (id: string) => void;
   onRegenerateSeed: (id: string) => void;
+  onResetIdentity: (id: string) => void;
   onDelete: (id: string) => void;
 }
 
@@ -23,7 +24,7 @@ function formatLastOpened(iso: string | null): string {
 
 export function ProfileList({
   profiles, warnings, busy,
-  onLaunch, onStop, onTest, onEdit, onDuplicate, onRegenerateSeed, onDelete,
+  onLaunch, onStop, onTest, onEdit, onDuplicate, onRegenerateSeed, onResetIdentity, onDelete,
 }: Props) {
   const [expanded, setExpanded] = useState<string | null>(null);
 
@@ -50,6 +51,7 @@ export function ProfileList({
         const ws = warnMap.get(p.id) ?? [];
         const isOpen = expanded === p.id;
         const isBusy = busy.has(p.id);
+        const identityDrift = p.identityLocked && !!p.resolvedIdentity?.exitIp && !!p.lastProxyCheck?.exitIp && p.resolvedIdentity.exitIp !== p.lastProxyCheck.exitIp;
         return (
           <div key={p.id} className="rounded-xl bg-slate-800 p-4 ring-1 ring-slate-700/60 transition-colors hover:ring-slate-600">
             <div className="flex items-center gap-3">
@@ -60,6 +62,18 @@ export function ProfileList({
               <span className="flex-1 truncate font-medium text-white">{p.name}</span>
               <span className="rounded bg-slate-700 px-1.5 py-0.5 text-[10px] font-medium uppercase text-slate-300">
                 {p.platform === 'macos' ? 'macOS' : 'Win'}
+              </span>
+              <span
+                className={`rounded px-1.5 py-0.5 text-[10px] font-medium uppercase ${
+                  identityDrift
+                    ? 'bg-red-900 text-red-200'
+                    : p.identityLocked
+                      ? 'bg-emerald-900 text-emerald-200'
+                      : 'bg-slate-700 text-slate-300'
+                }`}
+                title={identityDrift ? 'Identity drift detected' : p.identityLocked ? 'Identity locked' : 'Identity not locked yet'}
+              >
+                {identityDrift ? 'Drift' : p.identityLocked ? 'Locked' : 'Unlocked'}
               </span>
               {ws.map((w, i) => (
                 <span
@@ -87,6 +101,14 @@ export function ProfileList({
             {p.visitorId && (
               <p className="mt-0.5 pl-5 text-xs text-slate-500">
                 FP ID: <span className="font-mono text-slate-400">{p.visitorId.slice(0, 16)}</span>
+              </p>
+            )}
+            {p.resolvedIdentity && (
+              <p className="mt-0.5 pl-5 text-xs text-slate-500">
+                Locked IP: <span className="font-mono text-slate-400">{p.resolvedIdentity.exitIp}</span>
+                {p.resolvedIdentity.cloakBrowserVersion && (
+                  <> · Chromium <span className="font-mono text-slate-400">{p.resolvedIdentity.cloakBrowserVersion}</span></>
+                )}
               </p>
             )}
 
@@ -152,12 +174,12 @@ export function ProfileList({
               <div className="mt-2 pl-5 text-white">
                 <FingerprintPanel fingerprint={p.fingerprint} visitorId={p.visitorId} platform={p.platform} />
                 <button
-                  onClick={() => onRegenerateSeed(p.id)}
+                  onClick={() => (p.identityLocked ? onResetIdentity(p.id) : onRegenerateSeed(p.id))}
                   disabled={isBusy || p.running}
-                  title={p.running ? 'Dừng trước khi đổi seed' : 'Tạo danh tính fingerprint hoàn toàn mới'}
+                  title={p.running ? 'Dừng profile trước' : p.identityLocked ? 'Mở khoá identity để thiết lập lại fingerprint/proxy' : 'Tạo danh tính fingerprint hoàn toàn mới'}
                   className="mt-2 rounded-lg bg-slate-700 px-3 py-1 text-xs text-amber-300 hover:bg-slate-600 disabled:opacity-50 transition-colors"
                 >
-                  🔄 Đổi seed (danh tính mới)
+                  {p.identityLocked ? 'Reset identity' : '🔄 Đổi seed (danh tính mới)'}
                 </button>
               </div>
             )}

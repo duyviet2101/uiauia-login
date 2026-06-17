@@ -7,6 +7,8 @@ import type {
   ProxyWarning,
   InitState,
   UpdateInfo,
+  LaunchResult,
+  IdentityPreflightResult,
 } from '../main/types';
 
 const bridge = typeof window !== 'undefined' ? window.api : undefined;
@@ -35,7 +37,10 @@ export const api = {
   duplicate: (id: string) => need().duplicateProfile(id),
   remove: (id: string) => need().deleteProfile(id),
   regenerateSeed: (id: string) => need().regenerateSeed(id),
-  launch: (id: string) => need().launch(id),
+  resetIdentity: (id: string) => need().resetIdentity(id),
+  preflightIdentity: (id: string): Promise<IdentityPreflightResult> => need().preflightIdentity(id),
+  launch: (id: string): Promise<LaunchResult> => need().launch(id),
+  forceLaunch: (id: string): Promise<LaunchResult> => need().forceLaunch(id),
   stop: (id: string) => need().stop(id),
   openUrl: (id: string, url: string) => need().openUrl(id, url),
   testProxy: (p: ProxyConfig): Promise<ProxyTestResult> => need().testProxy(p),

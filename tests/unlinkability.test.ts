@@ -6,8 +6,36 @@ function profile(id: string, host: string | null, port = 8080): Profile {
   return {
     id, name: id, seed: 1, platform: 'windows', geoip: true, timezone: null, locale: null,
     startUrl: null, userDataDir: '/d/' + id, fingerprint: null, visitorId: null,
+    identityLocked: false, resolvedIdentity: null, lastProxyCheck: null,
     createdAt: '', lastOpenedAt: null,
     proxy: host ? { type: 'http', host, port } : null,
+  };
+}
+
+function lockedProfile(id: string, exitIp: string, host = id): Profile {
+  const p = profile(id, host);
+  const fingerprint = {
+    userAgent: 'ua', platform: 'Win32', hardwareConcurrency: 8, deviceMemory: 8,
+    languages: ['en'], screen: { width: 1, height: 1, colorDepth: 24 }, devicePixelRatio: 1,
+    webglVendor: null, webglRenderer: null, timezone: 'UTC', webdriver: false, capturedAt: 'now',
+  };
+  return {
+    ...p,
+    identityLocked: true,
+    resolvedIdentity: {
+      lockedAt: 'now',
+      cloakBrowserVersion: '146',
+      seed: p.seed,
+      platform: p.platform,
+      proxy: p.proxy!,
+      exitIp,
+      locale: 'en-US',
+      timezone: 'UTC',
+      webrtcIp: exitIp,
+      fingerprint,
+      visitorId: null,
+    },
+    lastProxyCheck: { checkedAt: 'now', ok: true, exitIp, country: 'US', city: 'NYC', asn: '1', isp: 'ISP' },
   };
 }
 
@@ -29,5 +57,9 @@ describe('proxyWarnings', () => {
   it('flags duplicated proxy host as medium', () => {
     const w = proxyWarnings([profile('a', '1.1.1.1'), profile('b', '1.1.1.1')]);
     expect(w.filter((x) => x.level === 'medium').map((x) => x.profileId).sort()).toEqual(['a', 'b']);
+  });
+  it('flags duplicated locked exit IP as high risk', () => {
+    const w = proxyWarnings([lockedProfile('a', '9.9.9.9'), lockedProfile('b', '9.9.9.9')]);
+    expect(w.filter((x) => x.level === 'high').map((x) => x.profileId).sort()).toEqual(['a', 'b']);
   });
 });

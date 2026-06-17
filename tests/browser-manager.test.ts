@@ -6,6 +6,7 @@ import { EventEmitter } from 'events';
 import { ProfileStore } from '../src/main/store';
 import { BrowserManager } from '../src/main/browser-manager';
 import type { Fingerprint } from '../src/main/types';
+import { IdentityService } from '../src/main/identity-service';
 
 function fakeContext() {
   const page = {
@@ -37,6 +38,19 @@ async function setup() {
   const capture = vi.fn(async () => fakeFp);
   const mgr = new BrowserManager(store, launcher, capture);
   return { store, mgr, ctx, launcher, capture };
+}
+
+async function setupWithProxy() {
+  const dir = mkdtempSync(join(tmpdir(), 'cloak-'));
+  const store = new ProfileStore(dir, { idGen: () => 'p1', seedGen: () => 9 });
+  await store.init();
+  await store.create({ name: 'A', proxy: { type: 'http', host: 'h', port: 80 } });
+  const ctx = fakeContext();
+  const launcher = vi.fn(async () => ctx);
+  const capture = vi.fn(async () => fakeFp);
+  const identity = new IdentityService({ test: vi.fn(async () => ({ ok: true, exitIp: '9.9.9.9' })) } as any, () => '146');
+  const mgr = new BrowserManager(store, launcher, capture, vi.fn(async () => 'visitor'), identity);
+  return { store, mgr };
 }
 
 describe('BrowserManager', () => {
@@ -78,5 +92,43 @@ describe('BrowserManager', () => {
     await mgr.stop('p1');
     expect(ctx.close).toHaveBeenCalled();
     expect(mgr.isRunning('p1')).toBe(false);
+  });
+
+  it('auto-locks identity after first successful proxied launch', async () => {
+    const { mgr, store } = await setupWithProxy();
+    const result = await mgr.launch('p1');
+    const p = store.get('p1')!;
+    expect(result.lockedNow).toBe(true);
+    expect(p.identityLocked).toBe(true);
+    expect(p.resolvedIdentity?.exitIp).toBe('9.9.9.9');
+    expect(p.resolvedIdentity?.cloakBrowserVersion).toBe('146');
+    expect(p.geoip).toBe(false);
+  });
+
+  it('forceLaunch reconciles locked identity to current IP and keeps fingerprint', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cloak-'));
+    const store = new ProfileStore(dir, { idGen: () => 'p1', seedGen: () => 9 });
+    await store.init();
+    await store.create({ name: 'A', proxy: { type: 'http', host: 'h', port: 80 } });
+    const ctx = fakeContext();
+    const launcher = vi.fn(async () => ctx);
+    let ip = '9.9.9.9';
+    const identity = new IdentityService({ test: vi.fn(async () => ({ ok: true, exitIp: ip })) } as any, () => '146');
+    const mgr = new BrowserManager(store, launcher, vi.fn(async () => fakeFp), vi.fn(async () => 'visitor'), identity);
+
+    await mgr.launch('p1'); // auto-lock at 9.9.9.9
+    await mgr.stop('p1');
+    const lockedFp = store.get('p1')!.fingerprint;
+    const lockedSeed = store.get('p1')!.seed;
+
+    ip = '5.5.5.5'; // proxy rotated to a different /24
+    await mgr.forceLaunch('p1');
+
+    const p = store.get('p1')!;
+    expect(p.identityLocked).toBe(true);
+    expect(p.resolvedIdentity?.exitIp).toBe('5.5.5.5');
+    expect(p.resolvedIdentity?.webrtcIp).toBe('5.5.5.5');
+    expect(p.seed).toBe(lockedSeed);
+    expect(p.fingerprint).toEqual(lockedFp);
   });
 });

@@ -23,6 +23,35 @@ export interface Fingerprint {
 
 export type FingerprintPlatform = 'windows' | 'macos';
 
+export interface ProxyCheckSnapshot {
+  checkedAt: string;
+  ok: boolean;
+  exitIp?: string;
+  country?: string;
+  city?: string;
+  timezone?: string;
+  asn?: string;
+  isp?: string;
+  latencyMs?: number;
+  error?: string;
+}
+
+export interface ResolvedIdentity {
+  lockedAt: string;
+  cloakBrowserVersion: string;
+  seed: number;
+  platform: FingerprintPlatform;
+  proxy: ProxyConfig;
+  exitIp: string;
+  exitCountry?: string;
+  exitTimezone?: string;
+  locale: string | null;
+  timezone: string | null;
+  webrtcIp: string | null;
+  fingerprint: Fingerprint;
+  visitorId: string | null;
+}
+
 export interface Profile {
   id: string;
   name: string;
@@ -36,6 +65,9 @@ export interface Profile {
   userDataDir: string;
   fingerprint: Fingerprint | null;
   visitorId: string | null;
+  identityLocked: boolean;
+  resolvedIdentity: ResolvedIdentity | null;
+  lastProxyCheck: ProxyCheckSnapshot | null;
   createdAt: string;
   lastOpenedAt: string | null;
 }
@@ -55,7 +87,12 @@ export type UpdateProfileInput = Partial<Omit<Profile, 'id' | 'seed' | 'userData
 export interface ProxyTestResult {
   ok: boolean;
   ip?: string;
+  exitIp?: string;
   country?: string;
+  city?: string;
+  timezone?: string;
+  asn?: string;
+  isp?: string;
   latencyMs?: number;
   error?: string;
 }
@@ -68,6 +105,35 @@ export interface ProxyWarning {
   profileId: string;
   level: 'high' | 'medium';
   message: string;
+}
+
+export interface IdentityDrift {
+  field: string;
+  expected: string | null;
+  actual: string | null;
+}
+
+export class IdentityDriftError extends Error {
+  readonly code = 'IDENTITY_DRIFT_BLOCKED';
+
+  constructor(public readonly drift: IdentityDrift[]) {
+    super(`Identity drift blocked: ${drift.map((d) => d.field).join(', ')}`);
+  }
+}
+
+export interface LaunchResult {
+  launched: true;
+  lockedNow: boolean;
+  warnings: ProxyWarning[];
+}
+
+export interface IdentityPreflightResult {
+  ok: boolean;
+  drift: IdentityDrift[];
+  /** Proxy check used for the exit-IP comparison, if one ran. */
+  snapshot?: ProxyCheckSnapshot;
+  /** True when `snapshot` was reused from cache rather than freshly tested. */
+  fromCache?: boolean;
 }
 
 export type InitPhase =

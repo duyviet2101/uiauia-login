@@ -5,7 +5,9 @@ import { launchPersistentContext } from 'cloakbrowser';
 import type { ProfileStore } from './store';
 import { buildLaunchArgs } from './launch-args';
 import { captureFingerprint, captureVisitorId } from './fingerprint-probe';
-import type { Fingerprint } from './types';
+import { IdentityService } from './identity-service';
+import { proxyWarnings } from './unlinkability';
+import { IdentityDriftError, type Fingerprint, type LaunchResult } from './types';
 
 type Launcher = (opts: LaunchPersistentContextOptions) => Promise<BrowserContext>;
 type Capturer = (page: Page) => Promise<Fingerprint>;
@@ -24,12 +26,19 @@ export class BrowserManager extends EventEmitter {
     private launcher: Launcher = launchPersistentContext,
     private capturer: Capturer = captureFingerprint,
     private visitorCapturer: (page: Page) => Promise<string | null> = captureVisitorId,
+    private identityService: IdentityService = new IdentityService(),
   ) { super(); }
 
-  async launch(id: string): Promise<void> {
-    if (this.running.has(id)) return;
+  async launch(id: string, opts: { force?: boolean } = {}): Promise<LaunchResult> {
+    if (this.running.has(id)) return { launched: true, lockedNow: false, warnings: proxyWarnings(this.store.list()) };
     const profile = this.store.get(id);
     if (!profile) throw new Error(`Profile not found: ${id}`);
+    if (profile.identityLocked && !opts.force) {
+      const result = await this.identityService.checkLockedIdentity(profile);
+      // Persist a freshly-fetched proxy check so the next open can reuse it (TTL).
+      if (result.snapshot && !result.fromCache) await this.store.setLastProxyCheck(id, result.snapshot);
+      if (!result.ok) throw new IdentityDriftError(result.drift);
+    }
 
     const ctx = await this.launcher(buildLaunchArgs(profile));
     this.running.set(id, ctx);
@@ -42,15 +51,28 @@ export class BrowserManager extends EventEmitter {
 
     // First time we see this profile, probe its fingerprint (and FingerprintJS
     // visitor id) on a controlled origin, then move on to the landing page.
-    if (!profile.fingerprint || !profile.visitorId) {
+    let fingerprint = profile.fingerprint;
+    let visitorId = profile.visitorId;
+    if (!fingerprint || !visitorId) {
       await page.goto(PROBE_URL).catch(() => {});
-      if (!profile.fingerprint) {
-        const fp = await this.capturer(page);
-        await this.store.update(id, { fingerprint: fp });
+      if (!fingerprint) {
+        fingerprint = await this.capturer(page);
+        await this.store.update(id, { fingerprint });
       }
-      if (!profile.visitorId) {
-        const vid = await this.visitorCapturer(page).catch(() => null);
-        if (vid) await this.store.update(id, { visitorId: vid });
+      if (!visitorId) {
+        visitorId = await this.visitorCapturer(page).catch(() => null);
+        if (visitorId) await this.store.update(id, { visitorId });
+      }
+    }
+
+    let lockedNow = false;
+    if (!profile.identityLocked && profile.proxy && fingerprint) {
+      const proxySnapshot = await this.identityService.checkProxy(profile.proxy);
+      await this.store.setLastProxyCheck(id, proxySnapshot);
+      if (proxySnapshot.ok && proxySnapshot.exitIp) {
+        const identity = this.identityService.lockIdentityFromLaunch(profile, fingerprint, visitorId, proxySnapshot);
+        await this.store.lockIdentity(id, identity, proxySnapshot);
+        lockedNow = true;
       }
     }
 
@@ -58,6 +80,27 @@ export class BrowserManager extends EventEmitter {
     await page.goto(profile.startUrl || DEFAULT_START_URL).catch(() => {});
 
     this.emit('status-changed', id, true);
+    return { launched: true, lockedNow, warnings: proxyWarnings(this.store.list()) };
+  }
+
+  /**
+   * Open a locked profile while accepting the current environment as the new
+   * baseline: re-align the locked identity (exit IP, browser version) to what
+   * the proxy resolves now, then launch without the drift block. Keeps seed,
+   * fingerprint, and session data — the safe alternative to resetting identity.
+   */
+  async forceLaunch(id: string): Promise<LaunchResult> {
+    const profile = this.store.get(id);
+    if (!profile) throw new Error(`Profile not found: ${id}`);
+    if (profile.identityLocked && profile.resolvedIdentity) {
+      let snapshot;
+      if (profile.proxy) {
+        snapshot = await this.identityService.checkProxy(profile.proxy);
+        await this.store.setLastProxyCheck(id, snapshot);
+      }
+      await this.store.reconcileLockedIdentity(id, this.identityService.reconcilePatch(snapshot));
+    }
+    return this.launch(id, { force: true });
   }
 
   /** Launch the profile if needed, then navigate its window to `url`
