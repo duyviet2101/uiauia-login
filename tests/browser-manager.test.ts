@@ -8,8 +8,16 @@ import { BrowserManager } from '../src/main/browser-manager';
 import type { Fingerprint } from '../src/main/types';
 
 function fakeContext() {
+  const page = {
+    goto: vi.fn(async () => null),
+    evaluate: vi.fn(async () => ({})),
+    close: vi.fn(async () => {}),
+  };
   const ee = new EventEmitter() as any;
   ee.close = vi.fn(async () => ee.emit('close'));
+  ee.pages = () => [page];
+  ee.newPage = vi.fn(async () => page);
+  ee.page = page;
   return ee;
 }
 

@@ -1,4 +1,4 @@
-import type { BrowserContext } from 'playwright-core';
+import type { Page } from 'playwright-core';
 import type { Fingerprint } from './types';
 
 export interface RawProbe {
@@ -63,13 +63,12 @@ function probeInPage(): RawProbe {
   };
 }
 
-export async function captureFingerprint(context: BrowserContext): Promise<Fingerprint> {
-  const page = await context.newPage();
-  try {
-    await page.goto('about:blank');
-    const raw = (await page.evaluate(probeInPage)) as RawProbe;
-    return parseFingerprint(raw);
-  } finally {
-    await page.close();
-  }
+/**
+ * Read the fingerprint from an already-open page. The probe only reads
+ * navigator/screen/WebGL, which are available on any document (including the
+ * default about:blank), so no extra tab is opened.
+ */
+export async function captureFingerprint(page: Page): Promise<Fingerprint> {
+  const raw = (await page.evaluate(probeInPage)) as RawProbe;
+  return parseFingerprint(raw);
 }
