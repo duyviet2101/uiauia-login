@@ -1,9 +1,10 @@
 name: Release
 
-# Build installers on real macOS + Windows runners and attach them to the
-# GitHub Release matching the pushed tag (e.g. v0.1.1). Building the Windows
-# NSIS installer on a real Windows runner avoids the "integrity check failed"
-# corruption that happens when cross-building from macOS via Wine.
+# Build installers on native macOS + Windows runners, then publish ONE release
+# with all artifacts. We deliberately do NOT use electron-builder's GitHub
+# publisher: with a parallel matrix it races and creates duplicate draft
+# releases. Instead each job uploads artifacts, and a final job attaches them
+# to a single published release for the pushed tag.
 
 on:
   push:
@@ -36,7 +37,29 @@ jobs:
 
       - run: npm run build
 
-      - name: Build & publish installer
-        run: npx electron-builder ${{ matrix.args }} --publish always
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build installer (no publish)
+        run: npx electron-builder ${{ matrix.args }} --publish never
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installers-${{ matrix.os }}
+          path: |
+            dist/*.dmg
+            dist/*.exe
+          if-no-files-found: ignore
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true
