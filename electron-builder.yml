@@ -31,6 +31,9 @@ mac:
 
 dmg:
   title: CloakBrowser Manager
+  # Keep the physical filename identical to the URL written to latest-mac.yml.
+  # GitHub sanitizes spaces in release asset names differently from electron-builder.
+  artifactName: CloakBrowser-Manager-${version}-${arch}.${ext}
 
 # Windows
 win:
@@ -42,5 +45,7 @@ win:
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
+  # A space-free name prevents GitHub's asset URL from diverging from latest.yml.
+  artifactName: CloakBrowser-Manager-Setup-${version}.${ext}
 
 # Linux intentionally omitted — only built when `electron-builder --linux` is run.
