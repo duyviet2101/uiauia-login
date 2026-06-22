@@ -112,12 +112,11 @@ Renderer (`api.ts` + `preload.ts`): thêm wrapper `update.check()/start()/apply(
 
 ## 8. Thay đổi CI (`release.yml`) — bắt buộc
 
-Hiện job build chỉ upload `dist/*.dmg`, `dist/*.exe`. **Updater không có metadata để đọc.** Thêm vào glob upload-artifact và release:
-- `dist/latest.yml` (Windows — bắt buộc cho electron-updater)
-- `dist/*.blockmap` (differential, tốt cho Win)
-- `dist/latest-mac.yml`, `dist/*.zip` (mac — KHÔNG cần cho luồng free hiện tại, nhưng publish sẵn để **sau này ký số là chạy silent ngay**, khỏi sửa lại CI)
+Hiện job build chỉ upload `dist/*.dmg`, `dist/*.exe`. **Windows updater không có metadata để đọc.** Thêm vào glob upload-artifact:
+- `dist/latest.yml` + `dist/*.blockmap` (**Windows — bắt buộc cho electron-updater**; nsis target sinh ra sẵn).
+- Globs `dist/latest*.yml`, `dist/*.zip` để sẵn cho mọi nền tảng (vô hại, `if-no-files-found: ignore`).
 
-electron-builder đã sinh các file này trong `dist/` ở bước `--publish never`. `fail_on_unmatched_files` chỉnh phù hợp (yml/zip chỉ có theo từng OS).
+**macOS chỉ ship `.dmg` (không có `latest-mac.yml`/`.zip`).** Lý do (quyết định khi review, lệch khỏi ý định forward-compat ban đầu): electron-builder chỉ sinh `latest-mac.yml` khi có **`zip` target** (Squirrel.Mac update từ zip, không từ dmg). Luồng free hiện tại KHÔNG cần nó — `MacUpdater` đọc release qua GitHub API rồi tải `.dmg` trực tiếp. Thêm `zip` target bây giờ chỉ tổ phình release (~2×100MB) cho một tương lai chưa chắc tới. Khi nào áp dụng ký số mac để silent-update, **lúc đó mới** thêm `zip` target + `latest-mac.yml` — đằng nào cũng phải sửa CI để thêm cert/notarize, nên không mất gì khi hoãn (YAGNI).
 
 ## 9. Chiến lược test (TDD)
 
