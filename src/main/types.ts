@@ -155,3 +155,28 @@ export interface UpdateInfo {
   url: string | null;
   error?: string;
 }
+
+export type UpdateState = 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'up-to-date' | 'error';
+
+export interface UpdateStatus {
+  state: UpdateState;
+  platform: 'win32' | 'darwin' | 'other';
+  current: string;
+  latest: string | null;
+  percent?: number;
+  canAutoInstall: boolean;
+  error?: string;
+}
+
+export interface UpdaterAdapter {
+  /** Win = true (cài & relaunch); Mac = false (chỉ mở installer). */
+  readonly canAutoInstall: boolean;
+  check(current: string): Promise<{ available: boolean; latest: string | null }>;
+  start(onProgress: (percent: number) => void): Promise<{ ready: boolean; artifactPath?: string }>;
+  apply(): Promise<void>;
+}
+
+export interface GithubAsset {
+  name: string;
+  browser_download_url: string;
+}
