@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import type { CreateProfileInput, UpdateProfileInput, ProxyConfig, InitState, UpdateInfo } from '../main/types';
+import type { CreateProfileInput, UpdateProfileInput, ProxyConfig, InitState, UpdateInfo, UpdateStatus } from '../main/types';
 
 const api = {
   getInitState: (): Promise<InitState> => ipcRenderer.invoke('app:get-init-state'),
@@ -11,6 +11,17 @@ const api = {
   getVersion: (): Promise<string> => ipcRenderer.invoke('app:get-version'),
   checkUpdate: (): Promise<UpdateInfo> => ipcRenderer.invoke('app:check-update'),
   openExternal: (url: string): Promise<void> => ipcRenderer.invoke('app:open-external', url),
+
+  update: {
+    check: (): Promise<UpdateStatus> => ipcRenderer.invoke('update:check'),
+    start: (): Promise<void> => ipcRenderer.invoke('update:start'),
+    apply: (): Promise<void> => ipcRenderer.invoke('update:apply'),
+    onStatus: (cb: (s: UpdateStatus) => void) => {
+      const handler = (_e: unknown, s: UpdateStatus) => cb(s);
+      ipcRenderer.on('update:status', handler);
+      return () => ipcRenderer.removeListener('update:status', handler);
+    },
+  },
 
   listProfiles: () => ipcRenderer.invoke('profiles:list'),
   warnings: () => ipcRenderer.invoke('profiles:warnings'),

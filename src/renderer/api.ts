@@ -7,6 +7,7 @@ import type {
   ProxyWarning,
   InitState,
   UpdateInfo,
+  UpdateStatus,
   LaunchResult,
   IdentityPreflightResult,
 } from '../main/types';
@@ -30,10 +31,17 @@ export const api = {
   checkUpdate: (): Promise<UpdateInfo> => need().checkUpdate(),
   openExternal: (url: string): Promise<void> => need().openExternal(url),
 
+  update: {
+    check: (): Promise<UpdateStatus> => need().update.check(),
+    start: (): Promise<void> => need().update.start(),
+    apply: (): Promise<void> => need().update.apply(),
+    onStatus: (cb: (s: UpdateStatus) => void) => need().update.onStatus(cb),
+  },
+
   list: (): Promise<ProfileRuntime[]> => need().listProfiles(),
   warnings: (): Promise<ProxyWarning[]> => need().warnings(),
   create: (i: CreateProfileInput) => need().createProfile(i),
-  update: (id: string, p: UpdateProfileInput) => need().updateProfile(id, p),
+  updateProfile: (id: string, p: UpdateProfileInput) => need().updateProfile(id, p),
   duplicate: (id: string) => need().duplicateProfile(id),
   remove: (id: string) => need().deleteProfile(id),
   regenerateSeed: (id: string) => need().regenerateSeed(id),
