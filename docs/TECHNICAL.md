@@ -65,11 +65,22 @@ args: [
   `--fingerprint=${seed}`,                         // bộ fingerprint nhất quán theo seed
   `--fingerprint-platform=${platform}`,            // windows | macos
   '--ignore-gpu-blocklist',                        // headed cần để WebGL chạy
+  // Phần cứng theo từng profile (derive từ seed) — xem mục 4.1
+  `--fingerprint-screen-width=${w}`, `--fingerprint-screen-height=${h}`,
+  `--fingerprint-hardware-concurrency=${cores}`,
+  ...(deviceMemory ? [`--fingerprint-device-memory=${deviceMemory}`] : []),
   ...(proxy && !geoip ? ['--fingerprint-webrtc-ip=auto'] : []),
 ]
 stealthArgs: false,   // bỏ default của cloakbrowser (gồm --no-sandbox, không cần trên desktop)
 proxy, geoip, timezone, locale, headless: false
 ```
+
+### 4.1 Phần cứng theo từng profile (`deriveHardwareProfile`)
+
+Binary mặc định để `screen` (1920×1080 Win / 1440×900 Mac), `hardwareConcurrency` (8), `deviceMemory` (8) **giống hệt nhau ở mọi seed** → nhiều profile trên cùng 1 máy dùng chung các giá trị này = vector liên kết same-device. `deriveHardwareProfile(seed, platform)` chọn **deterministic theo seed** một bộ (độ phân giải từ pool theo OS, cores ∈ {4,6,8,12,16}, RAM ∈ {4,8}) rồi truyền explicit. Vì seed cố định → giá trị ổn định giữa các lần mở, nhưng **khác nhau giữa các profile**.
+
+- **Profile đã có fingerprint** (đã khoá, hoặc đã probe lần mở trước): **tái dùng đúng giá trị cũ** từ `fingerprint`/`resolvedIdentity` — account đã "ấm" không bao giờ bị đổi thiết bị. Chỉ profile **mới tinh** mới derive từ seed.
+- Đã kiểm chứng trên binary macOS 25-patch: explicit flag **được tôn trọng** (screen/cores đổi đúng theo profile). Riêng **canvas/audio không có flag** → vẫn là giới hạn (mục 9.1).
 
 - `geoip: true` (mặc định khi có proxy) tự khớp timezone/locale theo IP exit **và** tự inject `--fingerprint-webrtc-ip`. Cần `mmdb-lib` + DB GeoLite2 (cloakbrowser tự tải).
 - Override `timezone`/`locale` thủ công sẽ thắng geoip.
@@ -104,19 +115,22 @@ Hiển thị badge cảnh báo trên từng card.
 
 ## 9. Hạn chế (đầy đủ, đã kiểm chứng)
 
-### 9.1 macOS — canvas không đa dạng hoá theo seed ⚠️ (quan trọng nhất)
-Đã đo thực nghiệm trên macOS: `--fingerprint=<seed>` làm **WebGL renderer đổi** theo seed (RTX/Apple GPU khác nhau) nhưng **canvas-2D hash GIỐNG HỆT** ở mọi seed, mọi render path (GPU / `--disable-gpu` / SwiftShader). Trên **Windows thì canvas đổi đúng**. → Đây là giới hạn của binary cloakbrowser bản macOS, không sửa được ở tầng app.
+### 9.1 macOS — canvas & audio không đa dạng hoá theo seed ⚠️ (quan trọng nhất)
+**Nguyên nhân gốc:** binary macOS đang ở Chromium **145.0.7632.109.2 = 25 patch fingerprint**, trong khi Windows/Linux ở **146.0.7680.177.5 = 57 patch** (`cloakbrowser/config.py` PLATFORM_CHROMIUM_VERSIONS). Các patch làm canvas/audio biến thiên theo seed nằm trong bản 57-patch, **chưa có ở bản Mac 25-patch**. (npm 0.4.0 — 2026-06-22 — vẫn để Mac ở 145/25 → nâng version npm không cứu được.)
+
+Đã đo thực nghiệm trên macOS (M3): `--fingerprint=<seed>` làm **WebGL renderer đổi** theo seed nhưng **canvas-2D hash VÀ audio hash GIỐNG HỆT** ở mọi seed, và giống cả khi đổi `--fingerprint-platform` windows↔macos. Không có flag canvas/audio → **không sửa được ở tầng app**.
 
 Hệ quả & sắc thái:
-- FingerprintJS **visitorId vẫn khác nhau** giữa các profile trên macOS (vì tổng hợp WebGL/audio/fonts… khác) → đa số fingerprinting thương mại vẫn coi là thiết bị khác.
-- Nhưng tracker **chuyên hash canvas thô** (vd tab Canvas của browserleaks) sẽ thấy chung → có thể liên kết.
-- **Khuyến nghị: vận hành account giá trị cao trên Windows.** macOS dùng cho dev/test hoặc rủi ro thấp.
+- FingerprintJS **visitorId vẫn khác nhau** giữa các profile trên macOS (tổng hợp WebGL/screen/cores/audio… khác) → đa số fingerprinting thương mại vẫn coi là thiết bị khác. Sau khi vary screen/cores (mục 4.1) khoảng cách này càng lớn.
+- Nhưng tracker **chuyên hash canvas/audio thô** (vd tab Canvas của browserleaks) sẽ thấy chung → có thể liên kết.
+- **Khuyến nghị: vận hành account giá trị cao trên Windows** (binary 57-patch vary cả canvas+audio). macOS dùng cho dev/test hoặc rủi ro thấp.
 
-### 9.2 Trục không điều khiển được theo seed
-`hardwareConcurrency` (kẹt ~8), `deviceMemory`, độ phân giải màn hình — không có flag trong cloakbrowser 0.3.31. Là giá trị phổ biến nên ít làm profile nổi bật, nhưng không biến thiên giữa các profile.
+### 9.2 Trục screen / cores / memory — ĐÃ vary theo profile
+**Trước đây:** `hardwareConcurrency`, `deviceMemory`, độ phân giải màn hình kẹt cứng (8 / 8 / 1920×1080) ở mọi seed → dùng chung giữa các profile. (Tài liệu cũ ghi sai là "không có flag trong 0.3.31" — flag `--fingerprint-screen-width/height`, `-hardware-concurrency`, `-device-memory` **có sẵn** trong 0.3.31.)
+**Hiện tại:** `deriveHardwareProfile` (mục 4.1) truyền explicit các flag này theo seed → **biến thiên giữa các profile** trên cả Win lẫn Mac. Caveat: `navigator.deviceMemory` đọc ra `null` trên `about:blank` (cần verify trên trang HTTPS thật); flag vẫn được truyền.
 
 ### 9.3 Font enumeration
-Patch canvas noise theo seed, nhưng JS enumerate font vẫn phản ánh font OS thật → tín hiệu liên kết tiềm tàng giữa các profile cùng máy.
+JS enumerate font vẫn phản ánh font OS thật → tín hiệu liên kết tiềm tàng giữa các profile cùng máy. Engine **có** `--fingerprint-fonts-dir` (trỏ tới bộ font theo platform) nhưng app **chưa dùng** vì cần đóng gói bộ font kèm app — để dành làm sau.
 
 ### 9.4 Ký số
 Chưa code-sign (Windows) / notarize (macOS) → SmartScreen / Gatekeeper cảnh báo. Cần Apple Developer (~$99/năm) + cert Windows để hết.
