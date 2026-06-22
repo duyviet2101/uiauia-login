@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync } from 'fs';
+import { mkdtempSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { ProfileStore } from '../src/main/store';
@@ -47,6 +47,7 @@ describe('ProfileStore', () => {
     expect(p.resolvedIdentity).toBeNull();
     expect(p.diagnostics).toBeNull();
     expect(p.lastProxyCheck).toBeNull();
+    expect(p.windowCustomization).toEqual({ enabled: true, number: 1, color: '#2563EB' });
     expect(p.userDataDir).toContain('id1');
     expect(store.list()).toHaveLength(1);
   });
@@ -67,6 +68,8 @@ describe('ProfileStore', () => {
     expect(b.seed).not.toBe(a.seed);
     expect(b.userDataDir).not.toBe(a.userDataDir);
     expect(b.proxy).toEqual(a.proxy);
+    expect(b.windowCustomization.number).toBe(2);
+    expect(b.windowCustomization.color).not.toBe(a.windowCustomization.color);
   });
 
   it('regenerateSeed assigns new seed and clears cached fingerprint/visitorId', async () => {
@@ -113,6 +116,18 @@ describe('ProfileStore', () => {
     await expect(store.update(p.id, { timezone: 'Asia/Tokyo' })).rejects.toThrow('identity is locked');
     await store.update(p.id, { name: 'B' });
     expect(store.get(p.id)!.name).toBe('B');
+  });
+
+  it('allows native window customization on a locked profile and preserves its number', async () => {
+    const store = await makeStore();
+    const p = await store.create({ name: 'A', proxy: { type: 'http', host: 'h', port: 80 } });
+    await store.lockIdentity(p.id, identity(p.seed));
+    await store.update(p.id, { windowCustomization: { enabled: false, color: '#abcdef' } });
+    expect(store.get(p.id)!.windowCustomization).toEqual({
+      enabled: false,
+      number: p.windowCustomization.number,
+      color: '#ABCDEF',
+    });
   });
 
   it('locked profile rejects regenerateSeed', async () => {
@@ -171,5 +186,37 @@ describe('ProfileStore', () => {
     await s2.init();
     expect(s2.list()).toHaveLength(1);
     expect(s2.get('fixed')!.name).toBe('A');
+  });
+
+  it('does not reuse a deleted native window number', async () => {
+    const store = await makeStore();
+    const first = await store.create({ name: 'A' });
+    await store.remove(first.id);
+    const second = await store.create({ name: 'B' });
+    expect(second.windowCustomization.number).toBe(2);
+  });
+
+  it('migrates legacy profiles to stable unique window numbers', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cloak-legacy-'));
+    const legacyProfile = (id: string, createdAt: string) => ({
+      id, name: id, seed: 1, platform: 'windows', proxy: null, geoip: true,
+      timezone: null, locale: null, startUrl: null, userDataDir: join(dir, 'profiles', id),
+      fingerprint: null, visitorId: null, diagnostics: null, identityLocked: false,
+      resolvedIdentity: null, lastProxyCheck: null, createdAt, lastOpenedAt: null,
+    });
+    writeFileSync(join(dir, 'cloak.json'), JSON.stringify({
+      version: 4,
+      profiles: [legacyProfile('newer', '2026-02-01'), legacyProfile('older', '2026-01-01')],
+    }));
+
+    const firstLoad = new ProfileStore(dir);
+    await firstLoad.init();
+    expect(firstLoad.get('older')!.windowCustomization.number).toBe(1);
+    expect(firstLoad.get('newer')!.windowCustomization.number).toBe(2);
+
+    const secondLoad = new ProfileStore(dir);
+    await secondLoad.init();
+    expect(secondLoad.get('older')!.windowCustomization.number).toBe(1);
+    expect(secondLoad.get('newer')!.windowCustomization.number).toBe(2);
   });
 });

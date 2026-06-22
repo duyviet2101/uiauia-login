@@ -12,6 +12,9 @@ import { UpdateService, NullUpdater } from './update-service';
 import { MacUpdater } from './mac-updater';
 import { WinUpdater, resolveElectronAutoUpdater } from './win-updater';
 import type { UpdaterAdapter, UpdateStatus } from './types';
+import type { ProfileWindowService } from './profile-window-service';
+import { NullProfileWindowService } from './profile-window-service';
+import { ProfileIconCache } from './profile-icon';
 
 let initState: InitState = { phase: 'starting', message: 'Đang khởi động…' };
 
@@ -100,10 +103,28 @@ app.whenReady().then(async () => {
     await store.init();
     const proxyTester = new ProxyTester();
     const identityService = new IdentityService(proxyTester);
+    let profileWindowService: ProfileWindowService = new NullProfileWindowService();
+    if (process.platform === 'win32') {
+      try {
+        const [{ createKoffiWindowsAdapter }, { WindowsProfileWindowService }] = await Promise.all([
+          import('./windows-native-adapter'),
+          import('./windows-profile-window-service'),
+        ]);
+        const iconCache = new ProfileIconCache(app.getPath('userData'));
+        iconCache.removeStale(new Set(store.list().map((profile) => profile.id)));
+        profileWindowService = new WindowsProfileWindowService(
+          await createKoffiWindowsAdapter(),
+          iconCache,
+        );
+      } catch (error) {
+        console.warn('[window-customization] Windows native service disabled:', error);
+      }
+    }
     const manager = new BrowserManager(store, undefined, undefined, undefined, identityService, () => {
       const s = screen.getPrimaryDisplay().size;
       return s.width > 0 && s.height > 0 ? { width: s.width, height: s.height } : { width: 1920, height: 1080 };
-    });
+    }, profileWindowService);
+    app.once('before-quit', () => manager.dispose());
     registerIpc(store, manager, proxyTester, identityService);
 
     const updateRepo = 'duyviet2101/uiauia-login';

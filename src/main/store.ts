@@ -4,14 +4,15 @@ import { join } from 'path';
 import { mkdirSync, rmSync } from 'fs';
 import { randomUUID } from 'crypto';
 import type { Profile, CreateProfileInput, UpdateProfileInput, ResolvedIdentity, ProxyCheckSnapshot } from './types';
+import { createWindowCustomization, normalizeProfileIconColor } from './profile-window-customization';
 
-interface Data { profiles: Profile[]; version?: number }
+interface Data { profiles: Profile[]; version?: number; nextWindowNumber?: number }
 interface Opts { seedGen?: () => number; idGen?: () => string }
 
 const defaultSeed = () => Math.floor(Math.random() * 99_990_000) + 10_000;
 
 /** Bump when the Profile shape changes; `migrate()` backfills older records. */
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 const LOCKED_IDENTITY_FIELDS = ['proxy', 'geoip', 'timezone', 'locale', 'platform'] as const;
 
 export class ProfileStore {
@@ -36,7 +37,11 @@ export class ProfileStore {
    *  builds, so existing data keeps working after an app update. */
   private migrate(): boolean {
     let changed = false;
-    for (const p of this.db.data.profiles as (Profile & Record<string, unknown>)[]) {
+    const profiles = this.db.data.profiles as (Profile & Record<string, unknown>)[];
+    const usedWindowNumbers = new Set<number>();
+    const needsWindowNumber: (Profile & Record<string, unknown>)[] = [];
+
+    for (const p of profiles) {
       if (p.platform === undefined) { p.platform = 'windows'; changed = true; }
       if (p.startUrl === undefined) { p.startUrl = null; changed = true; }
       if (p.visitorId === undefined) { p.visitorId = null; changed = true; }
@@ -44,7 +49,38 @@ export class ProfileStore {
       if (p.identityLocked === undefined) { p.identityLocked = false; changed = true; }
       if (p.resolvedIdentity === undefined) { p.resolvedIdentity = null; changed = true; }
       if (p.lastProxyCheck === undefined) { p.lastProxyCheck = null; changed = true; }
+      const raw = p.windowCustomization as unknown;
+      const value = raw && typeof raw === 'object' ? raw as Record<string, unknown> : null;
+      const number = value?.number;
+      if (typeof number === 'number' && Number.isSafeInteger(number) && number > 0 && !usedWindowNumbers.has(number)) {
+        usedWindowNumbers.add(number);
+        const enabled = typeof value?.enabled === 'boolean' ? value.enabled : true;
+        const color = normalizeProfileIconColor(value?.color, number);
+        if (!value || value.enabled !== enabled || value.color !== color) changed = true;
+        p.windowCustomization = { enabled, number, color };
+      } else {
+        needsWindowNumber.push(p);
+      }
     }
+
+    needsWindowNumber.sort((a, b) => {
+      const time = String(a.createdAt ?? '').localeCompare(String(b.createdAt ?? ''));
+      return time || profiles.indexOf(a) - profiles.indexOf(b);
+    });
+    let candidate = 1;
+    for (const p of needsWindowNumber) {
+      while (usedWindowNumbers.has(candidate)) candidate += 1;
+      p.windowCustomization = createWindowCustomization(candidate);
+      usedWindowNumbers.add(candidate);
+      candidate += 1;
+      changed = true;
+    }
+    const minimumNext = Math.max(0, ...usedWindowNumbers) + 1;
+    const storedNext = this.db.data.nextWindowNumber;
+    const nextWindowNumber = typeof storedNext === 'number' && Number.isSafeInteger(storedNext)
+      ? Math.max(storedNext, minimumNext)
+      : minimumNext;
+    if (storedNext !== nextWindowNumber) { this.db.data.nextWindowNumber = nextWindowNumber; changed = true; }
     if (this.db.data.version !== SCHEMA_VERSION) { this.db.data.version = SCHEMA_VERSION; changed = true; }
     return changed;
   }
@@ -56,6 +92,8 @@ export class ProfileStore {
     const id = this.idGen();
     const userDataDir = join(this.dataDir, 'profiles', id);
     mkdirSync(userDataDir, { recursive: true });
+    const windowNumber = this.db.data.nextWindowNumber ?? 1;
+    this.db.data.nextWindowNumber = windowNumber + 1;
     const profile: Profile = {
       id,
       name: input.name,
@@ -73,6 +111,7 @@ export class ProfileStore {
       identityLocked: false,
       resolvedIdentity: null,
       lastProxyCheck: null,
+      windowCustomization: createWindowCustomization(windowNumber, input.windowCustomization),
       createdAt: new Date().toISOString(),
       lastOpenedAt: null,
     };
@@ -90,7 +129,14 @@ export class ProfileStore {
         throw new Error(`Profile identity is locked. Reset identity before changing: ${changed.join(', ')}`);
       }
     }
-    Object.assign(p, patch);
+    const { windowCustomization, ...profilePatch } = patch;
+    Object.assign(p, profilePatch);
+    if (windowCustomization) {
+      p.windowCustomization = createWindowCustomization(p.windowCustomization.number, {
+        enabled: windowCustomization.enabled ?? p.windowCustomization.enabled,
+        color: windowCustomization.color ?? p.windowCustomization.color,
+      });
+    }
     await this.db.write();
   }
 

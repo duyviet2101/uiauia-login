@@ -7,6 +7,7 @@ function profile(over: Partial<Profile> = {}): Profile {
     id: 'p1', name: 'A', seed: 12345, platform: 'windows', proxy: null, geoip: true,
     timezone: null, locale: null, startUrl: null, userDataDir: '/data/p1',
     fingerprint: null, visitorId: null, diagnostics: null, identityLocked: false, resolvedIdentity: null, lastProxyCheck: null,
+    windowCustomization: { enabled: true, number: 1, color: '#2563EB' },
     createdAt: '', lastOpenedAt: null, ...over,
   };
 }
@@ -58,6 +59,7 @@ describe('buildLaunchArgs', () => {
     expect(o.headless).toBe(false);
     expect(o.userDataDir).toBe('/data/p1');
     expect(o.args).toContain('--fingerprint=12345');
+    expect(o.args?.some((arg) => arg.includes('window-title') || arg.includes('profile-icon'))).toBe(false);
   });
   it('forces windows platform and drops default stealth args (no --no-sandbox)', () => {
     const o = buildLaunchArgs(profile());

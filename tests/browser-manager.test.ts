@@ -66,6 +66,34 @@ async function setupWithProxy() {
 }
 
 describe('BrowserManager', () => {
+  it('keeps launch successful when native window customization is unavailable', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cloak-'));
+    const store = new ProfileStore(dir, { idGen: () => 'p1', seedGen: () => 9 });
+    await store.init();
+    await store.create({ name: 'A' });
+    const ctx = fakeContext();
+    const windowService = {
+      attach: vi.fn(async () => { throw new Error('native unavailable'); }),
+      refresh: vi.fn(async () => {}),
+      detach: vi.fn(),
+      dispose: vi.fn(),
+    };
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const mgr = new BrowserManager(
+      store,
+      vi.fn(async () => ctx),
+      vi.fn(async () => fakeFp),
+      undefined,
+      undefined,
+      undefined,
+      windowService,
+    );
+
+    await expect(mgr.launch('p1')).resolves.toMatchObject({ launched: true });
+    expect(windowService.attach).toHaveBeenCalledOnce();
+    warn.mockRestore();
+  });
+
   it('launch calls launcher with fingerprint seed arg and tracks running', async () => {
     const { mgr, launcher } = await setup();
     await mgr.launch('p1');

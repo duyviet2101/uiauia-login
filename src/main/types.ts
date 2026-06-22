@@ -40,6 +40,20 @@ export interface FingerprintDiagnostics {
 
 export type FingerprintPlatform = 'windows' | 'macos';
 
+export interface WindowCustomization {
+  enabled: boolean;
+  /** Stable manager-assigned number shown in the native Windows title/icon. */
+  number: number;
+  /** Normalized #RRGGBB icon background color. */
+  color: string;
+}
+
+export interface WindowCustomizationInput {
+  enabled?: boolean;
+  /** Null/undefined asks the store to choose the deterministic palette color. */
+  color?: string | null;
+}
+
 export interface ProxyCheckSnapshot {
   checkedAt: string;
   ok: boolean;
@@ -86,6 +100,7 @@ export interface Profile {
   identityLocked: boolean;
   resolvedIdentity: ResolvedIdentity | null;
   lastProxyCheck: ProxyCheckSnapshot | null;
+  windowCustomization: WindowCustomization;
   createdAt: string;
   lastOpenedAt: string | null;
 }
@@ -98,9 +113,14 @@ export interface CreateProfileInput {
   timezone?: string | null;
   locale?: string | null;
   startUrl?: string | null;
+  windowCustomization?: WindowCustomizationInput;
 }
 
-export type UpdateProfileInput = Partial<Omit<Profile, 'id' | 'seed' | 'userDataDir' | 'createdAt'>>;
+export type UpdateProfileInput = Partial<
+  Omit<Profile, 'id' | 'seed' | 'userDataDir' | 'createdAt' | 'windowCustomization'>
+> & {
+  windowCustomization?: WindowCustomizationInput;
+};
 
 export interface ProxyTestResult {
   ok: boolean;

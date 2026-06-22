@@ -8,6 +8,7 @@ import { captureFingerprint, captureFingerprintDiagnostics } from './fingerprint
 import { IdentityService } from './identity-service';
 import { proxyWarnings } from './unlinkability';
 import { IdentityDriftError, type Fingerprint, type FingerprintDiagnostics, type LaunchResult } from './types';
+import { NullProfileWindowService, type ProfileWindowService } from './profile-window-service';
 
 type Launcher = (opts: LaunchPersistentContextOptions) => Promise<BrowserContext>;
 type Capturer = (page: Page) => Promise<Fingerprint>;
@@ -28,6 +29,7 @@ export class BrowserManager extends EventEmitter {
     /** Reads the real monitor so the spoofed screen matches it (window stays
      *  on-screen + fullscreen works). Injected to keep this unit-testable. */
     private displayProvider: () => Display = () => ({ width: 1920, height: 1080 }),
+    private profileWindowService: ProfileWindowService = new NullProfileWindowService(),
   ) { super(); }
 
   async launch(id: string, opts: { force?: boolean } = {}): Promise<LaunchResult> {
@@ -44,8 +46,13 @@ export class BrowserManager extends EventEmitter {
     const ctx = await this.launcher(buildLaunchArgs(profile, this.displayProvider()));
     this.running.set(id, ctx);
     ctx.on('close', () => {
+      this.profileWindowService.detach(id);
       this.running.delete(id);
       this.emit('status-changed', id, false);
+    });
+
+    await this.profileWindowService.attach(profile, ctx).catch((error) => {
+      console.warn(`[window-customization] Attach failed for ${id}:`, error);
     });
 
     const page = ctx.pages()[0] ?? (await ctx.newPage());
@@ -123,6 +130,21 @@ export class BrowserManager extends EventEmitter {
     const ctx = this.running.get(id);
     if (ctx) await ctx.close();
     this.running.delete(id);
+    this.profileWindowService.detach(id);
+  }
+
+  async refreshWindowCustomization(id: string): Promise<void> {
+    if (!this.running.has(id)) return;
+    const profile = this.store.get(id);
+    if (profile) {
+      await this.profileWindowService.refresh(profile).catch((error) => {
+        console.warn(`[window-customization] Refresh failed for ${id}:`, error);
+      });
+    }
+  }
+
+  dispose(): void {
+    this.profileWindowService.dispose();
   }
 
   isRunning(id: string): boolean { return this.running.has(id); }

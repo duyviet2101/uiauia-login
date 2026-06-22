@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { ProfileRuntime, ProxyWarning } from '../../main/types';
 import { FingerprintPanel } from './FingerprintPanel';
 import { Spinner } from './Spinner';
+import { profileIconForeground } from '../../main/profile-window-customization';
 
 interface Props {
   profiles: ProfileRuntime[];
@@ -61,6 +62,16 @@ export function ProfileList({
                 title={p.running ? 'Đang chạy' : 'Đang tắt'}
               />
               <span className="flex-1 truncate font-medium text-white">{p.name}</span>
+              <span
+                className={`rounded px-1.5 py-0.5 text-[10px] font-black shadow-sm ${p.windowCustomization.enabled ? '' : 'opacity-50'}`}
+                style={{
+                  backgroundColor: p.windowCustomization.color,
+                  color: profileIconForeground(p.windowCustomization.color),
+                }}
+                title={p.windowCustomization.enabled ? 'Title/icon Windows đang bật' : 'Title/icon Windows đang tắt'}
+              >
+                #{p.windowCustomization.number}
+              </span>
               <span className="rounded bg-slate-700 px-1.5 py-0.5 text-[10px] font-medium uppercase text-slate-300">
                 {p.platform === 'macos' ? 'macOS' : 'Win'}
               </span>

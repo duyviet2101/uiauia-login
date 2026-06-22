@@ -19,7 +19,11 @@ export function registerIpc(
   ipcMain.handle('profiles:list', () => withRuntime());
   ipcMain.handle('profiles:warnings', () => proxyWarnings(store.list()));
   ipcMain.handle('profiles:create', (_e, input: CreateProfileInput) => store.create(input));
-  ipcMain.handle('profiles:update', (_e, id: string, patch: UpdateProfileInput) => store.update(id, patch));
+  ipcMain.handle('profiles:update', async (_e, id: string, patch: UpdateProfileInput) => {
+    await store.update(id, patch);
+    await manager.refreshWindowCustomization(id);
+    return store.get(id);
+  });
   ipcMain.handle('profiles:duplicate', (_e, id: string) => store.duplicate(id));
   ipcMain.handle('profiles:delete', (_e, id: string) => store.remove(id));
   ipcMain.handle('profiles:regenerate-seed', (_e, id: string) => store.regenerateSeed(id));

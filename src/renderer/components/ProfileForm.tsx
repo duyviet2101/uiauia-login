@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import type { Profile, ProxyConfig, ProxyTestResult, FingerprintPlatform } from '../../main/types';
+import type { Profile, ProxyConfig, ProxyTestResult, FingerprintPlatform, WindowCustomizationInput } from '../../main/types';
 import { parseProxyString } from '../../main/proxy-parse';
 import { api } from '../api';
 import { Spinner } from './Spinner';
+import { profileIconForeground } from '../../main/profile-window-customization';
 
 export interface ProfileFormValues {
   name: string;
@@ -12,6 +13,7 @@ export interface ProfileFormValues {
   timezone: string | null;
   locale: string | null;
   startUrl: string | null;
+  windowCustomization: WindowCustomizationInput;
 }
 
 interface Props {
@@ -23,6 +25,18 @@ interface Props {
 const inputCls =
   'w-full rounded-lg bg-slate-700 px-2.5 py-1.5 text-sm text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/70';
 const labelCls = 'block text-xs font-medium text-slate-400 mb-1';
+
+function WindowIconPreview({ number, color }: { number?: number; color: string }) {
+  return (
+    <span
+      className="inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl border border-white/20 text-sm font-black text-white shadow-md"
+      style={{ backgroundColor: color, color: profileIconForeground(color) }}
+      aria-label={number ? `Icon cửa sổ số ${number}` : 'Icon cửa sổ được đánh số tự động'}
+    >
+      {number ?? '#'}
+    </span>
+  );
+}
 
 export function ProfileForm({ initial, onSubmit, onCancel }: Props) {
   const editing = !!initial;
@@ -39,6 +53,8 @@ export function ProfileForm({ initial, onSubmit, onCancel }: Props) {
   const [timezone, setTimezone] = useState(initial?.timezone ?? '');
   const [locale, setLocale] = useState(initial?.locale ?? '');
   const [startUrl, setStartUrl] = useState(initial?.startUrl ?? '');
+  const [windowCustomizationEnabled, setWindowCustomizationEnabled] = useState(initial?.windowCustomization.enabled ?? true);
+  const [windowColor, setWindowColor] = useState(initial?.windowCustomization.color ?? '');
 
   const [quickPaste, setQuickPaste] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -95,6 +111,10 @@ export function ProfileForm({ initial, onSubmit, onCancel }: Props) {
         timezone: timezone.trim() || null,
         locale: locale.trim() || null,
         startUrl: startUrl.trim() || null,
+        windowCustomization: {
+          enabled: windowCustomizationEnabled,
+          color: windowColor || null,
+        },
       });
     } finally {
       setSubmitting(false);
@@ -239,6 +259,52 @@ export function ProfileForm({ initial, onSubmit, onCancel }: Props) {
         <div>
           <label className={labelCls}>Trang khởi đầu</label>
           <input className={inputCls} value={startUrl} onChange={(e) => setStartUrl(e.target.value)} placeholder="https://www.google.com (mặc định)" />
+        </div>
+
+        <div className="space-y-3 rounded-lg border border-slate-700 bg-slate-900/40 p-3">
+          <div className="flex items-center gap-3">
+            <WindowIconPreview
+              number={initial?.windowCustomization.number}
+              color={windowColor || '#2563EB'}
+            />
+            <div className="min-w-0 flex-1">
+              <label className="flex cursor-pointer select-none items-center gap-2 text-sm font-medium text-slate-200">
+                <input
+                  type="checkbox"
+                  className="accent-blue-500"
+                  checked={windowCustomizationEnabled}
+                  onChange={(e) => setWindowCustomizationEnabled(e.target.checked)}
+                />
+                Nhận diện cửa sổ Windows
+              </label>
+              <p className="mt-1 text-[11px] text-slate-500">
+                Title {initial ? `[#${initial.windowCustomization.number}]` : '[# tự động]'} và icon native; không thay đổi document.title hay fingerprint.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-end gap-2">
+            <div>
+              <label className={labelCls}>Màu icon</label>
+              <input
+                type="color"
+                value={windowColor || '#2563EB'}
+                onChange={(e) => setWindowColor(e.target.value.toUpperCase())}
+                disabled={!windowCustomizationEnabled}
+                className="h-9 w-16 cursor-pointer rounded-md border border-slate-600 bg-slate-700 p-1 disabled:cursor-not-allowed disabled:opacity-50"
+              />
+            </div>
+            {!initial && windowColor && (
+              <button
+                type="button"
+                onClick={() => setWindowColor('')}
+                className="mb-0.5 rounded-lg bg-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-600"
+              >
+                Màu tự động
+              </button>
+            )}
+            <span className="mb-1 text-xs text-slate-500">{windowColor || 'Tự động theo số profile'}</span>
+          </div>
         </div>
 
         <div className="flex justify-end gap-2 pt-1">

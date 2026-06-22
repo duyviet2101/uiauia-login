@@ -105,7 +105,12 @@ export default function App() {
   async function handleSubmit(values: ProfileFormValues) {
     try {
       if (editing) {
-        await api.updateProfile(editing.id, editing.identityLocked ? { name: values.name, startUrl: values.startUrl } : values);
+        await api.updateProfile(
+          editing.id,
+          editing.identityLocked
+            ? { name: values.name, startUrl: values.startUrl, windowCustomization: values.windowCustomization }
+            : values,
+        );
         addToast('success', `Đã lưu “${values.name}”.`);
       } else {
         await api.create(values);

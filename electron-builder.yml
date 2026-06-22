@@ -20,6 +20,10 @@ files:
   - out/**/*
   - node_modules/**/*
 
+asarUnpack:
+  - node_modules/koffi/**/*
+  - node_modules/@koromix/koffi-*/**/*
+
 # macOS
 mac:
   category: public.app-category.utilities
