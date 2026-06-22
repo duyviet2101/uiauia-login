@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { EventEmitter } from 'events';
-import { WinUpdater } from '../src/main/win-updater';
+import { WinUpdater, resolveElectronAutoUpdater } from '../src/main/win-updater';
 
 class FakeAutoUpdater extends EventEmitter {
   autoDownload = true;
@@ -14,6 +14,17 @@ class FakeAutoUpdater extends EventEmitter {
 }
 
 describe('WinUpdater', () => {
+  it('resolveElectronAutoUpdater đọc named export', () => {
+    const au = new FakeAutoUpdater();
+    expect(resolveElectronAutoUpdater({ autoUpdater: au })).toBe(au);
+  });
+  it('resolveElectronAutoUpdater đọc default export của dynamic import ESM', () => {
+    const au = new FakeAutoUpdater();
+    expect(resolveElectronAutoUpdater({ default: { autoUpdater: au } })).toBe(au);
+  });
+  it('resolveElectronAutoUpdater báo lỗi rõ khi thiếu autoUpdater', () => {
+    expect(() => resolveElectronAutoUpdater({ default: {} })).toThrow('autoUpdater export was not found');
+  });
   it('tắt autoDownload khi khởi tạo', () => {
     const au = new FakeAutoUpdater();
     new WinUpdater(au as never);

@@ -10,7 +10,7 @@ import { clearQuarantine } from './quarantine';
 import type { InitState } from './types';
 import { UpdateService, NullUpdater } from './update-service';
 import { MacUpdater } from './mac-updater';
-import { WinUpdater } from './win-updater';
+import { WinUpdater, resolveElectronAutoUpdater } from './win-updater';
 import type { UpdaterAdapter, UpdateStatus } from './types';
 
 let initState: InitState = { phase: 'starting', message: 'Đang khởi động…' };
@@ -108,8 +108,13 @@ app.whenReady().then(async () => {
       process.platform === 'win32' ? 'win32' : process.platform === 'darwin' ? 'darwin' : 'other';
     let updateAdapter: UpdaterAdapter;
     if (plat === 'win32') {
-      const { autoUpdater } = await import('electron-updater');
-      updateAdapter = new WinUpdater(autoUpdater as unknown as ConstructorParameters<typeof WinUpdater>[0]);
+      try {
+        const updaterModule = await import('electron-updater');
+        updateAdapter = new WinUpdater(resolveElectronAutoUpdater(updaterModule));
+      } catch (err) {
+        console.error('[update] Windows updater disabled:', err);
+        updateAdapter = new NullUpdater();
+      }
     } else if (plat === 'darwin') {
       updateAdapter = new MacUpdater(updateRepo);
     } else {

@@ -11,6 +11,37 @@ export interface ElectronAutoUpdater {
   quitAndInstall(): void;
 }
 
+function isElectronAutoUpdater(value: unknown): value is ElectronAutoUpdater {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Partial<ElectronAutoUpdater>;
+  return (
+    typeof candidate.on === 'function' &&
+    typeof candidate.checkForUpdates === 'function' &&
+    typeof candidate.downloadUpdate === 'function' &&
+    typeof candidate.quitAndInstall === 'function'
+  );
+}
+
+function readAutoUpdater(value: unknown): unknown {
+  try {
+    return (value as { autoUpdater?: unknown })?.autoUpdater;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Dynamic import of electron-updater exposes autoUpdater under default in ESM. */
+export function resolveElectronAutoUpdater(module: unknown): ElectronAutoUpdater {
+  const mod = module as { autoUpdater?: unknown; default?: unknown } | null | undefined;
+  const candidates = [
+    readAutoUpdater(mod),
+    readAutoUpdater(mod?.default),
+  ];
+  const autoUpdater = candidates.find(isElectronAutoUpdater);
+  if (!autoUpdater) throw new Error('electron-updater autoUpdater export was not found.');
+  return autoUpdater;
+}
+
 export class WinUpdater implements UpdaterAdapter {
   readonly canAutoInstall = true;
   private latest: string | null = null;
