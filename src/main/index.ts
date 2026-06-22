@@ -9,6 +9,10 @@ import { IdentityService } from './identity-service';
 import { clearQuarantine } from './quarantine';
 import { checkForUpdate } from './updater';
 import type { InitState } from './types';
+import { UpdateService, NullUpdater } from './update-service';
+import { MacUpdater } from './mac-updater';
+import { WinUpdater } from './win-updater';
+import type { UpdaterAdapter, UpdateStatus } from './types';
 
 let initState: InitState = { phase: 'starting', message: 'Đang khởi động…' };
 
@@ -100,6 +104,27 @@ app.whenReady().then(async () => {
     const identityService = new IdentityService(proxyTester);
     const manager = new BrowserManager(store, undefined, undefined, undefined, identityService);
     registerIpc(store, manager, proxyTester, identityService);
+
+    const updateRepo = 'duyviet2101/uiauia-login';
+    const plat: UpdateStatus['platform'] =
+      process.platform === 'win32' ? 'win32' : process.platform === 'darwin' ? 'darwin' : 'other';
+    let updateAdapter: UpdaterAdapter;
+    if (plat === 'win32') {
+      const { autoUpdater } = await import('electron-updater');
+      updateAdapter = new WinUpdater(autoUpdater as unknown as ConstructorParameters<typeof WinUpdater>[0]);
+    } else if (plat === 'darwin') {
+      updateAdapter = new MacUpdater(updateRepo);
+    } else {
+      updateAdapter = new NullUpdater();
+    }
+    const updateService = new UpdateService(updateAdapter, app.getVersion(), plat, (status) => {
+      for (const w of BrowserWindow.getAllWindows()) {
+        if (!w.isDestroyed()) w.webContents.send('update:status', status);
+      }
+    });
+    ipcMain.handle('update:check', () => updateService.check());
+    ipcMain.handle('update:start', () => updateService.start());
+    ipcMain.handle('update:apply', () => updateService.apply());
 
     setInitState({ phase: 'ready', message: '' });
   } catch (err) {
