@@ -15,6 +15,9 @@ export function pickDmgAsset(assets: GithubAsset[], arch: string): GithubAsset |
   });
   if (tagged) return tagged;
   const untagged = dmgs.find((x) => !/arm64|x64|x86_64|intel/i.test(x.name));
+  // Fallback cuối cùng: dmgs[0] có thể không khớp arch yêu cầu — cố ý, vì tốt hơn là
+  // cung cấp một installer nào đó hơn là không có gì; dmg không native vẫn chạy được
+  // trên Rosetta.
   return untagged ?? dmgs[0];
 }
 

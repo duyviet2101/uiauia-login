@@ -73,4 +73,20 @@ describe('MacUpdater.start + apply', () => {
     await u.apply();
     expect(opened).toEqual([r.artifactPath]);
   });
+
+  it('start: không có dmg -> mở trang release, ready=false', async () => {
+    const opened: string[] = [];
+    const fetcher = (async () => new Response(JSON.stringify({ tag_name: 'v9.9.9', html_url: 'https://rel', assets: [] }), { status: 200 })) as typeof fetch;
+    const u = new MacUpdater('o/r', { arch: 'arm64', fetcher, openExternal: async (url) => { opened.push(url); } });
+    await u.check('0.0.1');
+    const r = await u.start(() => {});
+    expect(r.ready).toBe(false);
+    expect(opened).toEqual(['https://rel']);
+  });
+
+  it('check: ném lỗi khi GitHub trả lỗi', async () => {
+    const fetcher = (async () => new Response('nope', { status: 503 })) as typeof fetch;
+    const u = new MacUpdater('o/r', { fetcher });
+    await expect(u.check('0.2.2')).rejects.toThrow('GitHub API 503');
+  });
 });

@@ -52,4 +52,16 @@ describe('UpdateService', () => {
     await svc.apply();
     expect(adapter.applied).toBe(true);
   });
+  it('start: adapter ready=false -> error', async () => {
+    const adapter: UpdaterAdapter = {
+      canAutoInstall: false,
+      async check() { return { available: true, latest: '9.9.9' }; },
+      async start() { return { ready: false }; },
+      async apply() {},
+    };
+    const s = sink();
+    const svc = new UpdateService(adapter, '0.2.2', 'darwin', s.push);
+    await svc.start();
+    expect(s.sent.at(-1)!.state).toBe('error');
+  });
 });

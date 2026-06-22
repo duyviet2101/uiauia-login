@@ -29,6 +29,7 @@ export default function App() {
   const [version, setVersion] = useState('');
   const [update, setUpdate] = useState<UpdateStatus | null>(null);
   const [updateDismissed, setUpdateDismissed] = useState(false);
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
 
   const dismissToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
@@ -80,6 +81,19 @@ export default function App() {
     api.update.check().catch(() => {});
     return () => { off(); };
   }, []);
+
+  const handleCheckUpdate = async () => {
+    setUpdateDismissed(false);
+    setCheckingUpdate(true);
+    try {
+      const s = await api.update.check();
+      if (s?.state === 'up-to-date') addToast('info', 'Đang dùng bản mới nhất.');
+    } catch {
+      /* lỗi sẽ hiện qua banner state='error' (broadcast) */
+    } finally {
+      setCheckingUpdate(false);
+    }
+  };
 
   function openCreate() { setEditing(null); setFormOpen(true); }
   function openEdit(id: string) {
@@ -210,9 +224,14 @@ export default function App() {
             </h1>
             <p className="text-xs text-slate-400">{profiles.length} profile · {runningCount} đang chạy</p>
           </div>
-          <button onClick={openCreate} className="rounded-lg bg-blue-600 px-4 py-1.5 text-sm font-medium hover:bg-blue-500 transition-colors">
-            + Tạo profile
-          </button>
+          <div className="flex items-center gap-2">
+            <button onClick={handleCheckUpdate} disabled={checkingUpdate} className="rounded-lg border border-slate-600 px-4 py-1.5 text-sm font-medium text-slate-300 hover:bg-slate-700 transition-colors disabled:opacity-50">
+              {checkingUpdate ? 'Đang kiểm tra…' : 'Kiểm tra cập nhật'}
+            </button>
+            <button onClick={openCreate} className="rounded-lg bg-blue-600 px-4 py-1.5 text-sm font-medium hover:bg-blue-500 transition-colors">
+              + Tạo profile
+            </button>
+          </div>
         </header>
 
         {update && !updateDismissed && ['available', 'downloading', 'downloaded', 'error'].includes(update.state) && (

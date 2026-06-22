@@ -43,4 +43,13 @@ describe('WinUpdater', () => {
     await new WinUpdater(au as never).apply();
     expect(au.quit).toBe(1);
   });
+  it('start gọi 2 lần chỉ tải 1 lần', async () => {
+    const au = new FakeAutoUpdater();
+    const w = new WinUpdater(au as never);
+    const p1 = w.start(() => {});
+    const p2 = w.start(() => {});
+    au.emit('update-downloaded', {});
+    await Promise.all([p1, p2]);
+    expect(au.downloads).toBe(1);
+  });
 });

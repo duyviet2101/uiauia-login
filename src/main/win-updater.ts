@@ -16,6 +16,7 @@ export class WinUpdater implements UpdaterAdapter {
   private latest: string | null = null;
   private onProgress: ((p: number) => void) | null = null;
   private resolveDownloaded: ((r: { ready: boolean }) => void) | null = null;
+  private downloading: Promise<{ ready: boolean }> | null = null;
 
   constructor(private au: ElectronAutoUpdater) {
     au.autoDownload = false;
@@ -42,10 +43,16 @@ export class WinUpdater implements UpdaterAdapter {
   }
 
   async start(onProgress: (p: number) => void): Promise<{ ready: boolean; artifactPath?: string }> {
+    if (this.downloading) return this.downloading;
     this.onProgress = onProgress;
-    const done = new Promise<{ ready: boolean }>((resolve) => { this.resolveDownloaded = resolve; });
-    await this.au.downloadUpdate();
-    return done;
+    this.downloading = new Promise<{ ready: boolean }>((resolve) => { this.resolveDownloaded = resolve; });
+    try {
+      await this.au.downloadUpdate();
+      return await this.downloading;
+    } finally {
+      this.downloading = null;
+      this.resolveDownloaded = null;
+    }
   }
 
   async apply(): Promise<void> {
