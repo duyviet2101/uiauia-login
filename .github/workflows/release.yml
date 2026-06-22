@@ -46,6 +46,9 @@ jobs:
           path: |
             dist/*.dmg
             dist/*.exe
+            dist/*.zip
+            dist/*.blockmap
+            dist/latest*.yml
           if-no-files-found: ignore
 
   release:
