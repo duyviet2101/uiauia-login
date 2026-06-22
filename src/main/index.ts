@@ -7,7 +7,6 @@ import { ProxyTester } from './proxy-tester';
 import { registerIpc } from './ipc';
 import { IdentityService } from './identity-service';
 import { clearQuarantine } from './quarantine';
-import { checkForUpdate } from './updater';
 import type { InitState } from './types';
 import { UpdateService, NullUpdater } from './update-service';
 import { MacUpdater } from './mac-updater';
@@ -83,7 +82,6 @@ app.whenReady().then(async () => {
   // even if it missed an earlier broadcast.
   ipcMain.handle('app:get-init-state', () => initState);
   ipcMain.handle('app:get-version', () => app.getVersion());
-  ipcMain.handle('app:check-update', () => checkForUpdate());
   ipcMain.handle('app:open-external', (_e, url: string) => shell.openExternal(url));
 
   try {

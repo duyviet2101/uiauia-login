@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import type { CreateProfileInput, UpdateProfileInput, ProxyConfig, InitState, UpdateInfo, UpdateStatus } from '../main/types';
+import type { CreateProfileInput, UpdateProfileInput, ProxyConfig, InitState, UpdateStatus } from '../main/types';
 
 const api = {
   getInitState: (): Promise<InitState> => ipcRenderer.invoke('app:get-init-state'),
@@ -9,7 +9,6 @@ const api = {
     return () => ipcRenderer.removeListener('app:init-state', handler);
   },
   getVersion: (): Promise<string> => ipcRenderer.invoke('app:get-version'),
-  checkUpdate: (): Promise<UpdateInfo> => ipcRenderer.invoke('app:check-update'),
   openExternal: (url: string): Promise<void> => ipcRenderer.invoke('app:open-external', url),
 
   update: {

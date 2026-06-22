@@ -6,7 +6,6 @@ import type {
   ProxyTestResult,
   ProxyWarning,
   InitState,
-  UpdateInfo,
   UpdateStatus,
   LaunchResult,
   IdentityPreflightResult,
@@ -28,7 +27,6 @@ export const api = {
   getInitState: (): Promise<InitState> => need().getInitState(),
   onInitState: (cb: (s: InitState) => void) => need().onInitState(cb),
   getVersion: (): Promise<string> => need().getVersion(),
-  checkUpdate: (): Promise<UpdateInfo> => need().checkUpdate(),
   openExternal: (url: string): Promise<void> => need().openExternal(url),
 
   update: {

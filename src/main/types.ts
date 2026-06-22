@@ -148,13 +148,6 @@ export interface InitState {
   message: string;
 }
 
-export interface UpdateInfo {
-  current: string;
-  latest: string | null;
-  hasUpdate: boolean;
-  url: string | null;
-  error?: string;
-}
 
 export type UpdateState = 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'up-to-date' | 'error';
 
