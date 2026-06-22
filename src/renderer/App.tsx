@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { ProfileRuntime, ProxyWarning, InitState, UpdateInfo, IdentityDrift } from '../main/types';
+import type { ProfileRuntime, ProxyWarning, InitState, UpdateStatus, IdentityDrift } from '../main/types';
 import { api, bridgeReady } from './api';
 import { ProfileList } from './components/ProfileList';
 import { ProfileForm, type ProfileFormValues } from './components/ProfileForm';
@@ -27,7 +27,7 @@ export default function App() {
   const [pendingIdentityReset, setPendingIdentityReset] = useState<ProfileRuntime | null>(null);
   const [pendingIdentityDrift, setPendingIdentityDrift] = useState<{ profile: ProfileRuntime; drift: IdentityDrift[] } | null>(null);
   const [version, setVersion] = useState('');
-  const [update, setUpdate] = useState<UpdateInfo | null>(null);
+  const [update, setUpdate] = useState<UpdateStatus | null>(null);
   const [updateDismissed, setUpdateDismissed] = useState(false);
 
   const dismissToast = useCallback((id: string) => {
@@ -69,12 +69,17 @@ export default function App() {
     if (init.phase !== 'ready') return;
     refresh().catch((e) => addToast('error', String(e instanceof Error ? e.message : e)));
     api.getVersion().then(setVersion).catch(() => {});
-    api.checkUpdate().then(setUpdate).catch(() => {});
     const unsub = api.onStatusChanged(({ id, running }) => {
       setProfiles((prev) => prev.map((p) => (p.id === id ? { ...p, running } : p)));
     });
     return () => { unsub(); };
   }, [init.phase, refresh, addToast]);
+
+  useEffect(() => {
+    const off = api.update.onStatus(setUpdate);
+    api.update.check().catch(() => {});
+    return () => { off(); };
+  }, []);
 
   function openCreate() { setEditing(null); setFormOpen(true); }
   function openEdit(id: string) {
@@ -210,10 +215,11 @@ export default function App() {
           </button>
         </header>
 
-        {update?.hasUpdate && !updateDismissed && (
+        {update && !updateDismissed && ['available', 'downloading', 'downloaded', 'error'].includes(update.state) && (
           <UpdateBanner
-            info={update}
-            onDownload={() => update.url && api.openExternal(update.url)}
+            status={update}
+            onStart={() => { void api.update.start(); }}
+            onApply={() => { void api.update.apply(); }}
             onDismiss={() => setUpdateDismissed(true)}
           />
         )}
