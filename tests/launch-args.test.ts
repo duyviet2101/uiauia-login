@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { toProxyUrl, buildLaunchArgs, deriveHardwareProfile, WINDOWS_SCREENS, MACOS_SCREENS } from '../src/main/launch-args';
+import { toProxyUrl, buildLaunchArgs, deriveHardwareProfile } from '../src/main/launch-args';
 import type { Profile, Fingerprint, ResolvedIdentity } from '../src/main/types';
 
 function profile(over: Partial<Profile> = {}): Profile {
@@ -33,10 +33,10 @@ function lockedWithFp(fp: Partial<Fingerprint>): Profile {
   return profile({ seed: 777, platform: 'windows', proxy: { type: 'http', host: 'h', port: 80 }, identityLocked: true, resolvedIdentity });
 }
 
+/** Signature of the per-profile (seed-varied) hardware: cores + memory only.
+ *  Screen is NOT here — it follows the real display, not the seed. */
 const hwSig = (o: { args?: string[] }) =>
   [
-    flag(o.args, '--fingerprint-screen-width'),
-    flag(o.args, '--fingerprint-screen-height'),
     flag(o.args, '--fingerprint-hardware-concurrency'),
     flag(o.args, '--fingerprint-device-memory'),
   ].join('/');
@@ -87,43 +87,69 @@ describe('buildLaunchArgs', () => {
     expect(o.locale).toBe('ja-JP');
   });
 
-  // --- Per-profile hardware variation (multi-account on one physical device) ---
+  // --- Screen MUST match the real display (not the seed). A spoofed screen that
+  // differs from the real monitor makes the binary's window-position patch fight
+  // fullscreen (window drifts off-screen) and trips FingerprintJS "Virtual machine".
 
-  it('unlocked: emits screen/cores/memory flags derived from the seed', () => {
+  it('screen + viewport come from the real display, not the seed', () => {
+    const display = { width: 1366, height: 768 };
+    const o = buildLaunchArgs(profile({ seed: 4242042, fingerprint: null }), display);
+    expect(flag(o.args, '--fingerprint-screen-width')).toBe('1366');
+    expect(flag(o.args, '--fingerprint-screen-height')).toBe('768');
+    expect(o.viewport).toEqual({ width: 1366, height: 768 - 133 });
+  });
+
+  it('screen is constant across seeds for the same display', () => {
+    const display = { width: 2560, height: 1440 };
+    const a = buildLaunchArgs(profile({ seed: 111, fingerprint: null }), display);
+    const b = buildLaunchArgs(profile({ seed: 999999, fingerprint: null }), display);
+    expect(flag(a.args, '--fingerprint-screen-width')).toBe('2560');
+    expect(flag(b.args, '--fingerprint-screen-width')).toBe(flag(a.args, '--fingerprint-screen-width'));
+  });
+
+  it('defaults to 1920x1080 when no display is provided', () => {
+    const o = buildLaunchArgs(profile());
+    expect(flag(o.args, '--fingerprint-screen-width')).toBe('1920');
+    expect(flag(o.args, '--fingerprint-screen-height')).toBe('1080');
+    expect(o.viewport).toEqual({ width: 1920, height: 947 });
+  });
+
+  // --- cores/memory DO still vary per profile (no window-geometry coupling) ---
+
+  it('unlocked: emits cores/memory flags derived from the seed', () => {
     const seed = 4242042;
-    const hw = deriveHardwareProfile(seed, 'windows');
-    const o = buildLaunchArgs(profile({ seed, platform: 'windows', fingerprint: null }));
-    expect(flag(o.args, '--fingerprint-screen-width')).toBe(String(hw.screenWidth));
-    expect(flag(o.args, '--fingerprint-screen-height')).toBe(String(hw.screenHeight));
+    const hw = deriveHardwareProfile(seed);
+    const o = buildLaunchArgs(profile({ seed, fingerprint: null }));
     expect(flag(o.args, '--fingerprint-hardware-concurrency')).toBe(String(hw.hardwareConcurrency));
     expect(flag(o.args, '--fingerprint-device-memory')).toBe(String(hw.deviceMemory));
   });
 
-  it('unlocked: hardware varies across seeds so profiles are not linkable by device', () => {
+  it('unlocked: cores/memory vary across seeds so profiles are not linkable by device', () => {
     const seeds = [11, 2222, 30303, 444444, 5, 67890, 9090909, 13, 808080, 1234567, 24680, 99999999];
     const sigs = new Set(seeds.map((s) => hwSig(buildLaunchArgs(profile({ seed: s, fingerprint: null })))));
-    expect(sigs.size).toBeGreaterThanOrEqual(4);
+    expect(sigs.size).toBeGreaterThanOrEqual(3);
   });
 
-  it('locked: hardware flags come from the frozen fingerprint, not re-derived', () => {
-    const o = buildLaunchArgs(lockedWithFp({ screen: { width: 1600, height: 900, colorDepth: 24 }, hardwareConcurrency: 12, deviceMemory: 8 }));
-    expect(flag(o.args, '--fingerprint-screen-width')).toBe('1600');
-    expect(flag(o.args, '--fingerprint-screen-height')).toBe('900');
+  it('locked: cores/memory from frozen fingerprint; screen from the real display', () => {
+    const o = buildLaunchArgs(
+      lockedWithFp({ screen: { width: 1600, height: 900, colorDepth: 24 }, hardwareConcurrency: 12, deviceMemory: 8 }),
+      { width: 1920, height: 1080 },
+    );
     expect(flag(o.args, '--fingerprint-hardware-concurrency')).toBe('12');
     expect(flag(o.args, '--fingerprint-device-memory')).toBe('8');
-  });
-
-  it('locked: null frozen deviceMemory => no device-memory flag (do not invent one)', () => {
-    const o = buildLaunchArgs(lockedWithFp({ screen: { width: 1920, height: 1080, colorDepth: 24 }, hardwareConcurrency: 8, deviceMemory: null }));
-    expect(flag(o.args, '--fingerprint-device-memory')).toBeUndefined();
+    // Screen follows the machine's monitor (1920), NOT the frozen 1600.
     expect(flag(o.args, '--fingerprint-screen-width')).toBe('1920');
   });
 
-  it('unlocked but already probed: reuse the probed fingerprint, do not change identity', () => {
-    const probed: Fingerprint = { ...baseFp, screen: { width: 1280, height: 720, colorDepth: 24 }, hardwareConcurrency: 4, deviceMemory: 4 };
+  it('locked: null frozen deviceMemory => no device-memory flag (do not invent one)', () => {
+    const o = buildLaunchArgs(lockedWithFp({ hardwareConcurrency: 8, deviceMemory: null }));
+    expect(flag(o.args, '--fingerprint-device-memory')).toBeUndefined();
+    expect(flag(o.args, '--fingerprint-hardware-concurrency')).toBe('8');
+  });
+
+  it('unlocked but already probed: reuse the probed cores/memory, do not change identity', () => {
+    const probed: Fingerprint = { ...baseFp, hardwareConcurrency: 4, deviceMemory: 4 };
     const o = buildLaunchArgs(profile({ seed: 555, fingerprint: probed }));
-    expect(flag(o.args, '--fingerprint-screen-width')).toBe('1280');
-    expect(flag(o.args, '--fingerprint-screen-height')).toBe('720');
     expect(flag(o.args, '--fingerprint-hardware-concurrency')).toBe('4');
     expect(flag(o.args, '--fingerprint-device-memory')).toBe('4');
   });
@@ -167,25 +193,16 @@ describe('buildLaunchArgs', () => {
 });
 
 describe('deriveHardwareProfile', () => {
-  it('is deterministic for the same seed + platform', () => {
-    expect(deriveHardwareProfile(12345, 'windows')).toEqual(deriveHardwareProfile(12345, 'windows'));
-    expect(deriveHardwareProfile(12345, 'macos')).toEqual(deriveHardwareProfile(12345, 'macos'));
+  it('is deterministic for the same seed', () => {
+    expect(deriveHardwareProfile(12345)).toEqual(deriveHardwareProfile(12345));
   });
 
-  it('spreads hardware across seeds (not a constant)', () => {
+  it('spreads cores/memory across seeds (not a constant)', () => {
     const seeds = Array.from({ length: 40 }, (_, i) => ((i + 1) * 2654435761) % 90000000 + 10000);
-    const screens = new Set(seeds.map((s) => { const h = deriveHardwareProfile(s, 'windows'); return `${h.screenWidth}x${h.screenHeight}`; }));
-    const cores = new Set(seeds.map((s) => deriveHardwareProfile(s, 'windows').hardwareConcurrency));
-    expect(screens.size).toBeGreaterThanOrEqual(3);
-    expect(cores.size).toBeGreaterThanOrEqual(2);
-  });
-
-  it('draws screen resolution from the platform-appropriate pool', () => {
-    for (const s of [1, 2, 3, 9999, 12345, 7777777]) {
-      const w = deriveHardwareProfile(s, 'windows');
-      const m = deriveHardwareProfile(s, 'macos');
-      expect(WINDOWS_SCREENS).toContainEqual([w.screenWidth, w.screenHeight]);
-      expect(MACOS_SCREENS).toContainEqual([m.screenWidth, m.screenHeight]);
-    }
+    const sigs = new Set(seeds.map((s) => {
+      const h = deriveHardwareProfile(s);
+      return `${h.hardwareConcurrency}/${h.deviceMemory}`;
+    }));
+    expect(sigs.size).toBeGreaterThanOrEqual(3);
   });
 });

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, shell, screen } from 'electron';
 import { join } from 'path';
 import { ensureBinary, binaryInfo } from 'cloakbrowser';
 import { ProfileStore } from './store';
@@ -100,7 +100,10 @@ app.whenReady().then(async () => {
     await store.init();
     const proxyTester = new ProxyTester();
     const identityService = new IdentityService(proxyTester);
-    const manager = new BrowserManager(store, undefined, undefined, undefined, identityService);
+    const manager = new BrowserManager(store, undefined, undefined, undefined, identityService, () => {
+      const s = screen.getPrimaryDisplay().size;
+      return s.width > 0 && s.height > 0 ? { width: s.width, height: s.height } : { width: 1920, height: 1080 };
+    });
     registerIpc(store, manager, proxyTester, identityService);
 
     const updateRepo = 'duyviet2101/uiauia-login';

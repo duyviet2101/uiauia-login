@@ -3,7 +3,7 @@ import type { BrowserContext, Page } from 'playwright-core';
 import type { LaunchPersistentContextOptions } from 'cloakbrowser';
 import { launchPersistentContext } from 'cloakbrowser';
 import type { ProfileStore } from './store';
-import { buildLaunchArgs } from './launch-args';
+import { buildLaunchArgs, type Display } from './launch-args';
 import { captureFingerprint, captureFingerprintDiagnostics } from './fingerprint-probe';
 import { IdentityService } from './identity-service';
 import { proxyWarnings } from './unlinkability';
@@ -25,6 +25,9 @@ export class BrowserManager extends EventEmitter {
     private capturer: Capturer = captureFingerprint,
     private diagnosticsCapturer: DiagnosticsCapturer = captureFingerprintDiagnostics,
     private identityService: IdentityService = new IdentityService(),
+    /** Reads the real monitor so the spoofed screen matches it (window stays
+     *  on-screen + fullscreen works). Injected to keep this unit-testable. */
+    private displayProvider: () => Display = () => ({ width: 1920, height: 1080 }),
   ) { super(); }
 
   async launch(id: string, opts: { force?: boolean } = {}): Promise<LaunchResult> {
@@ -38,7 +41,7 @@ export class BrowserManager extends EventEmitter {
       if (!result.ok) throw new IdentityDriftError(result.drift);
     }
 
-    const ctx = await this.launcher(buildLaunchArgs(profile));
+    const ctx = await this.launcher(buildLaunchArgs(profile, this.displayProvider()));
     this.running.set(id, ctx);
     ctx.on('close', () => {
       this.running.delete(id);
