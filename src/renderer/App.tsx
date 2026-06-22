@@ -161,6 +161,12 @@ export default function App() {
   const handleStop = (id: string) => withBusy(id, async () => { await api.stop(id); await refresh(); }, 'Không dừng được');
   const handleTest = (id: string) =>
     withBusy(id, async () => { await api.openUrl(id, TEST_FP_URL); addToast('info', 'Đã mở trang kiểm tra fingerprint.'); }, 'Không mở trang test được');
+  const handleDiagnostics = (id: string) =>
+    withBusy(id, async () => {
+      const diagnostics = await api.runDiagnostics(id);
+      await refresh();
+      addToast('success', `Diagnostics OK · fonts ${diagnostics.fontsAvailable}/${diagnostics.fontsTotal}`);
+    }, 'Không chạy diagnostics được');
   const handleDuplicate = (id: string) =>
     withBusy(id, async () => { await api.duplicate(id); await refresh(); addToast('success', 'Đã nhân bản profile.'); }, 'Lỗi nhân bản');
 
@@ -250,6 +256,7 @@ export default function App() {
           onLaunch={handleLaunch}
           onStop={handleStop}
           onTest={handleTest}
+          onDiagnostics={handleDiagnostics}
           onEdit={openEdit}
           onDuplicate={handleDuplicate}
           onRegenerateSeed={(id) => setPendingReseed(profiles.find((p) => p.id === id) ?? null)}

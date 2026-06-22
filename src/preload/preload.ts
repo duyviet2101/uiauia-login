@@ -35,6 +35,7 @@ const api = {
   forceLaunch: (id: string) => ipcRenderer.invoke('browser:force-launch', id),
   stop: (id: string) => ipcRenderer.invoke('browser:stop', id),
   openUrl: (id: string, url: string) => ipcRenderer.invoke('browser:open-url', id, url),
+  runDiagnostics: (id: string) => ipcRenderer.invoke('browser:diagnostics', id),
   testProxy: (proxy: ProxyConfig) => ipcRenderer.invoke('proxy:test', proxy),
   onStatusChanged: (cb: (p: { id: string; running: boolean }) => void) => {
     const handler = (_e: unknown, payload: { id: string; running: boolean }) => cb(payload);

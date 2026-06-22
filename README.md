@@ -45,8 +45,8 @@ Lần chạy đầu app tự tải Chromium stealth (~150 MB) về `~/.cloakbrow
 
 1. **+ Tạo profile** → đặt tên, chọn OS giả lập, dán proxy (`host:port:user:pass` tự tách), bật geoip / override timezone-locale nếu cần.
 2. **Test proxy** để kiểm IP exit trước khi mở.
-3. **Mở** → cửa sổ Chrome riêng hiện ra, đăng nhập/thao tác bình thường. Lần mở đầu app đo fingerprint + FingerprintJS visitorId.
-4. **Test FP ↗** mở trang kiểm tra fingerprint ngay trong profile.
+3. **Mở** → cửa sổ Chrome riêng hiện ra, đăng nhập/thao tác bình thường. Lần mở đầu app đo fingerprint local (navigator/screen/WebGL) để khóa identity.
+4. **Diagnostics** chạy probe local cho canvas/audio/font; **Test FP ↗** mở trang kiểm tra fingerprint bên ngoài khi cần.
 5. **Xem fingerprint** để đối chiếu giữa các profile; **Đổi seed** nếu muốn danh tính mới.
 
 > ⚠️ Để unlinkability tốt nhất nên chạy trên **Windows** — xem mục hạn chế canvas trên macOS trong tài liệu kỹ thuật.

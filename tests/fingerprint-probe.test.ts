@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseFingerprint, type RawProbe } from '../src/main/fingerprint-probe';
+import { parseDiagnostics, parseFingerprint, type RawDiagnostics, type RawProbe } from '../src/main/fingerprint-probe';
 
 const raw: RawProbe = {
   userAgent: 'Mozilla/5.0 ... Chrome/146.0.0.0',
@@ -26,5 +26,32 @@ describe('parseFingerprint', () => {
   it('null deviceMemory when undefined', () => {
     const fp = parseFingerprint({ ...raw, deviceMemory: undefined });
     expect(fp.deviceMemory).toBeNull();
+  });
+});
+
+const rawDiagnostics: RawDiagnostics = {
+  canvasHash: 'c123',
+  canvasWinding: true,
+  audioHash: 'a123',
+  fontHash: 'f123',
+  fonts: [
+    { family: 'Arial', available: true },
+    { family: 'Menlo', available: false },
+  ],
+};
+
+describe('parseDiagnostics', () => {
+  it('counts available fonts and stamps capturedAt', () => {
+    const diagnostics = parseDiagnostics(rawDiagnostics);
+    expect(diagnostics.fontsAvailable).toBe(1);
+    expect(diagnostics.fontsTotal).toBe(2);
+    expect(diagnostics.canvasHash).toBe('c123');
+    expect(diagnostics.audioHash).toBe('a123');
+    expect(diagnostics.capturedAt).toMatch(/\d{4}-\d{2}-\d{2}T/);
+  });
+
+  it('warns when audio probe is unavailable', () => {
+    const diagnostics = parseDiagnostics({ ...rawDiagnostics, audioHash: null });
+    expect(diagnostics.warnings).toContain('Audio probe unavailable');
   });
 });

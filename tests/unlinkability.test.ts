@@ -5,7 +5,7 @@ import type { Profile } from '../src/main/types';
 function profile(id: string, host: string | null, port = 8080): Profile {
   return {
     id, name: id, seed: 1, platform: 'windows', geoip: true, timezone: null, locale: null,
-    startUrl: null, userDataDir: '/d/' + id, fingerprint: null, visitorId: null,
+    startUrl: null, userDataDir: '/d/' + id, fingerprint: null, visitorId: null, diagnostics: null,
     identityLocked: false, resolvedIdentity: null, lastProxyCheck: null,
     createdAt: '', lastOpenedAt: null,
     proxy: host ? { type: 'http', host, port } : null,

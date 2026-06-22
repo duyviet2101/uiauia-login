@@ -4,19 +4,17 @@ import type { LaunchPersistentContextOptions } from 'cloakbrowser';
 import { launchPersistentContext } from 'cloakbrowser';
 import type { ProfileStore } from './store';
 import { buildLaunchArgs } from './launch-args';
-import { captureFingerprint, captureVisitorId } from './fingerprint-probe';
+import { captureFingerprint, captureFingerprintDiagnostics } from './fingerprint-probe';
 import { IdentityService } from './identity-service';
 import { proxyWarnings } from './unlinkability';
-import { IdentityDriftError, type Fingerprint, type LaunchResult } from './types';
+import { IdentityDriftError, type Fingerprint, type FingerprintDiagnostics, type LaunchResult } from './types';
 
 type Launcher = (opts: LaunchPersistentContextOptions) => Promise<BrowserContext>;
 type Capturer = (page: Page) => Promise<Fingerprint>;
+type DiagnosticsCapturer = (page: Page) => Promise<FingerprintDiagnostics>;
 
 /** Fallback landing page when a profile has no custom startUrl. */
 export const DEFAULT_START_URL = 'https://www.google.com';
-
-/** Controlled, CSP-free origin used to probe fingerprint + FingerprintJS id. */
-const PROBE_URL = 'https://example.com';
 
 export class BrowserManager extends EventEmitter {
   private running = new Map<string, BrowserContext>();
@@ -25,7 +23,7 @@ export class BrowserManager extends EventEmitter {
     private store: ProfileStore,
     private launcher: Launcher = launchPersistentContext,
     private capturer: Capturer = captureFingerprint,
-    private visitorCapturer: (page: Page) => Promise<string | null> = captureVisitorId,
+    private diagnosticsCapturer: DiagnosticsCapturer = captureFingerprintDiagnostics,
     private identityService: IdentityService = new IdentityService(),
   ) { super(); }
 
@@ -49,20 +47,14 @@ export class BrowserManager extends EventEmitter {
 
     const page = ctx.pages()[0] ?? (await ctx.newPage());
 
-    // First time we see this profile, probe its fingerprint (and FingerprintJS
-    // visitor id) on a controlled origin, then move on to the landing page.
+    // First time we see this profile, probe local navigator/screen/WebGL only.
+    // External FingerprintJS/CDN checks are diagnostic-only so normal launches
+    // do not add third-party network/cache traces to the profile.
     let fingerprint = profile.fingerprint;
-    let visitorId = profile.visitorId;
-    if (!fingerprint || !visitorId) {
-      await page.goto(PROBE_URL).catch(() => {});
-      if (!fingerprint) {
-        fingerprint = await this.capturer(page);
-        await this.store.update(id, { fingerprint });
-      }
-      if (!visitorId) {
-        visitorId = await this.visitorCapturer(page).catch(() => null);
-        if (visitorId) await this.store.update(id, { visitorId });
-      }
+    const visitorId = profile.visitorId;
+    if (!fingerprint) {
+      fingerprint = await this.capturer(page);
+      await this.store.update(id, { fingerprint });
     }
 
     let lockedNow = false;
@@ -81,6 +73,16 @@ export class BrowserManager extends EventEmitter {
 
     this.emit('status-changed', id, true);
     return { launched: true, lockedNow, warnings: proxyWarnings(this.store.list()) };
+  }
+
+  async runDiagnostics(id: string): Promise<FingerprintDiagnostics> {
+    if (!this.running.has(id)) await this.launch(id);
+    const ctx = this.running.get(id);
+    if (!ctx) throw new Error('Browser not running');
+    const page = ctx.pages()[0] ?? (await ctx.newPage());
+    const diagnostics = await this.diagnosticsCapturer(page);
+    await this.store.update(id, { diagnostics });
+    return diagnostics;
   }
 
   /**

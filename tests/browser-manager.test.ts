@@ -5,7 +5,7 @@ import { join } from 'path';
 import { EventEmitter } from 'events';
 import { ProfileStore } from '../src/main/store';
 import { BrowserManager } from '../src/main/browser-manager';
-import type { Fingerprint } from '../src/main/types';
+import type { Fingerprint, FingerprintDiagnostics } from '../src/main/types';
 import { IdentityService } from '../src/main/identity-service';
 
 function fakeContext() {
@@ -26,6 +26,18 @@ const fakeFp: Fingerprint = {
   userAgent: 'ua', platform: 'Win32', hardwareConcurrency: 8, deviceMemory: 8,
   languages: ['en'], screen: { width: 1, height: 1, colorDepth: 24 }, devicePixelRatio: 1,
   webglVendor: null, webglRenderer: null, timezone: 'UTC', webdriver: false, capturedAt: 'now',
+};
+
+const fakeDiagnostics: FingerprintDiagnostics = {
+  capturedAt: 'now',
+  canvasHash: 'canvas',
+  canvasWinding: true,
+  audioHash: 'audio',
+  fontHash: 'fonts',
+  fonts: [{ family: 'Arial', available: true }],
+  fontsAvailable: 1,
+  fontsTotal: 1,
+  warnings: [],
 };
 
 async function setup() {
@@ -49,7 +61,7 @@ async function setupWithProxy() {
   const launcher = vi.fn(async () => ctx);
   const capture = vi.fn(async () => fakeFp);
   const identity = new IdentityService({ test: vi.fn(async () => ({ ok: true, exitIp: '9.9.9.9' })) } as any, () => '146');
-  const mgr = new BrowserManager(store, launcher, capture, vi.fn(async () => 'visitor'), identity);
+  const mgr = new BrowserManager(store, launcher, capture, undefined, identity);
   return { store, mgr };
 }
 
@@ -67,6 +79,30 @@ describe('BrowserManager', () => {
     await mgr.launch('p1');
     expect(capture).toHaveBeenCalledOnce();
     expect(store.get('p1')!.fingerprint).toEqual(fakeFp);
+  });
+
+  it('does not run external FingerprintJS visitor probe during normal launch', async () => {
+    const { mgr, store, ctx } = await setup();
+    await mgr.launch('p1');
+    expect(store.get('p1')!.visitorId).toBeNull();
+    expect(ctx.page.goto).not.toHaveBeenCalledWith('https://example.com');
+  });
+
+  it('runDiagnostics captures and persists local diagnostics', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cloak-'));
+    const store = new ProfileStore(dir, { idGen: () => 'p1', seedGen: () => 9 });
+    await store.init();
+    await store.create({ name: 'A' });
+    const ctx = fakeContext();
+    const mgr = new BrowserManager(
+      store,
+      vi.fn(async () => ctx),
+      vi.fn(async () => fakeFp),
+      vi.fn(async () => fakeDiagnostics),
+    );
+    const diagnostics = await mgr.runDiagnostics('p1');
+    expect(diagnostics).toEqual(fakeDiagnostics);
+    expect(store.get('p1')!.diagnostics).toEqual(fakeDiagnostics);
   });
 
   it('skips capture when fingerprint already present', async () => {
@@ -114,7 +150,7 @@ describe('BrowserManager', () => {
     const launcher = vi.fn(async () => ctx);
     let ip = '9.9.9.9';
     const identity = new IdentityService({ test: vi.fn(async () => ({ ok: true, exitIp: ip })) } as any, () => '146');
-    const mgr = new BrowserManager(store, launcher, vi.fn(async () => fakeFp), vi.fn(async () => 'visitor'), identity);
+    const mgr = new BrowserManager(store, launcher, vi.fn(async () => fakeFp), undefined, identity);
 
     await mgr.launch('p1'); // auto-lock at 9.9.9.9
     await mgr.stop('p1');

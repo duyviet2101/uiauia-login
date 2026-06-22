@@ -11,7 +11,7 @@ interface Opts { seedGen?: () => number; idGen?: () => string }
 const defaultSeed = () => Math.floor(Math.random() * 99_990_000) + 10_000;
 
 /** Bump when the Profile shape changes; `migrate()` backfills older records. */
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 const LOCKED_IDENTITY_FIELDS = ['proxy', 'geoip', 'timezone', 'locale', 'platform'] as const;
 
 export class ProfileStore {
@@ -40,6 +40,7 @@ export class ProfileStore {
       if (p.platform === undefined) { p.platform = 'windows'; changed = true; }
       if (p.startUrl === undefined) { p.startUrl = null; changed = true; }
       if (p.visitorId === undefined) { p.visitorId = null; changed = true; }
+      if (p.diagnostics === undefined) { p.diagnostics = null; changed = true; }
       if (p.identityLocked === undefined) { p.identityLocked = false; changed = true; }
       if (p.resolvedIdentity === undefined) { p.resolvedIdentity = null; changed = true; }
       if (p.lastProxyCheck === undefined) { p.lastProxyCheck = null; changed = true; }
@@ -68,6 +69,7 @@ export class ProfileStore {
       userDataDir,
       fingerprint: null,
       visitorId: null,
+      diagnostics: null,
       identityLocked: false,
       resolvedIdentity: null,
       lastProxyCheck: null,
@@ -153,6 +155,7 @@ export class ProfileStore {
     p.resolvedIdentity = null;
     p.fingerprint = null;
     p.visitorId = null;
+    p.diagnostics = null;
     await this.db.write();
     return p;
   }
@@ -166,6 +169,7 @@ export class ProfileStore {
     p.seed = this.seedGen();
     p.fingerprint = null;
     p.visitorId = null;
+    p.diagnostics = null;
     p.resolvedIdentity = null;
     p.identityLocked = false;
     await this.db.write();

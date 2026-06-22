@@ -21,6 +21,23 @@ export interface Fingerprint {
   capturedAt: string;
 }
 
+export interface FontProbe {
+  family: string;
+  available: boolean;
+}
+
+export interface FingerprintDiagnostics {
+  capturedAt: string;
+  canvasHash: string;
+  canvasWinding: boolean | null;
+  audioHash: string | null;
+  fontHash: string;
+  fonts: FontProbe[];
+  fontsAvailable: number;
+  fontsTotal: number;
+  warnings: string[];
+}
+
 export type FingerprintPlatform = 'windows' | 'macos';
 
 export interface ProxyCheckSnapshot {
@@ -65,6 +82,7 @@ export interface Profile {
   userDataDir: string;
   fingerprint: Fingerprint | null;
   visitorId: string | null;
+  diagnostics: FingerprintDiagnostics | null;
   identityLocked: boolean;
   resolvedIdentity: ResolvedIdentity | null;
   lastProxyCheck: ProxyCheckSnapshot | null;

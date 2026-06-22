@@ -45,6 +45,7 @@ describe('ProfileStore', () => {
     expect(p.geoip).toBe(true);
     expect(p.identityLocked).toBe(false);
     expect(p.resolvedIdentity).toBeNull();
+    expect(p.diagnostics).toBeNull();
     expect(p.lastProxyCheck).toBeNull();
     expect(p.userDataDir).toContain('id1');
     expect(store.list()).toHaveLength(1);
@@ -76,12 +77,24 @@ describe('ProfileStore', () => {
         ...fakeFp,
       },
       visitorId: 'abc',
+      diagnostics: {
+        capturedAt: 'now',
+        canvasHash: 'c',
+        canvasWinding: true,
+        audioHash: 'a',
+        fontHash: 'f',
+        fonts: [],
+        fontsAvailable: 0,
+        fontsTotal: 0,
+        warnings: [],
+      },
     });
     const before = store.get(p.id)!.seed;
     const after = await store.regenerateSeed(p.id);
     expect(after.seed).not.toBe(before);
     expect(after.fingerprint).toBeNull();
     expect(after.visitorId).toBeNull();
+    expect(after.diagnostics).toBeNull();
   });
 
   it('create applies platform/startUrl defaults', async () => {
@@ -90,6 +103,7 @@ describe('ProfileStore', () => {
     expect(p.platform).toBe('windows');
     expect(p.startUrl).toBeNull();
     expect(p.visitorId).toBeNull();
+    expect(p.diagnostics).toBeNull();
   });
 
   it('locked profile rejects identity-impacting updates', async () => {
@@ -117,6 +131,7 @@ describe('ProfileStore', () => {
     expect(reset.resolvedIdentity).toBeNull();
     expect(reset.fingerprint).toBeNull();
     expect(reset.visitorId).toBeNull();
+    expect(reset.diagnostics).toBeNull();
     expect(reset.userDataDir).toContain(p.id);
   });
 

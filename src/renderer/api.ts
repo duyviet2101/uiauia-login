@@ -9,6 +9,7 @@ import type {
   UpdateStatus,
   LaunchResult,
   IdentityPreflightResult,
+  FingerprintDiagnostics,
 } from '../main/types';
 
 const bridge = typeof window !== 'undefined' ? window.api : undefined;
@@ -49,6 +50,7 @@ export const api = {
   forceLaunch: (id: string): Promise<LaunchResult> => need().forceLaunch(id),
   stop: (id: string) => need().stop(id),
   openUrl: (id: string, url: string) => need().openUrl(id, url),
+  runDiagnostics: (id: string): Promise<FingerprintDiagnostics> => need().runDiagnostics(id),
   testProxy: (p: ProxyConfig): Promise<ProxyTestResult> => need().testProxy(p),
   onStatusChanged: (cb: (p: { id: string; running: boolean }) => void) => need().onStatusChanged(cb),
 };

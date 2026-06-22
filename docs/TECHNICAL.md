@@ -87,8 +87,9 @@ Binary mặc định để `screen` (1920×1080 Win / 1440×900 Mac), `hardwareC
 
 ## 5. Đo & theo dõi fingerprint
 
-- Lần mở đầu: điều hướng tới origin trung lập (`example.com`), đọc `navigator/screen/WebGL` (`captureFingerprint`) và tính **FingerprintJS v4 visitorId** (`captureVisitorId`, best-effort, cần mạng). Lưu vào DB, hiển thị read-only.
-- Nút **Test FP** mở trang kiểm tra (browserleaks…) ngay trong profile.
+- Lần mở đầu: đọc local `navigator/screen/WebGL` (`captureFingerprint`) ngay trong page hiện có, **không** điều hướng tới origin trung gian và **không** import FingerprintJS CDN. Lưu snapshot vào DB, hiển thị read-only.
+- Nút **Diagnostics** chạy probe local cho `canvas`, `audio` và font availability, lưu hash/summary vào profile để đối chiếu giữa các profile mà không cần mạng.
+- Nút **Test FP** mở trang kiểm tra (browserleaks…) ngay trong profile khi người dùng chủ động muốn kiểm tra bằng dịch vụ bên ngoài.
 - **Đổi seed** xoá fingerprint+visitorId, đo lại ở lần mở kế.
 
 ## 6. Identity lock & drift detection (`IdentityService`)
@@ -130,7 +131,7 @@ Hệ quả & sắc thái:
 **Hiện tại:** `deriveHardwareProfile` (mục 4.1) truyền explicit các flag này theo seed → **biến thiên giữa các profile** trên cả Win lẫn Mac. Caveat: `navigator.deviceMemory` đọc ra `null` trên `about:blank` (cần verify trên trang HTTPS thật); flag vẫn được truyền.
 
 ### 9.3 Font enumeration
-JS enumerate font vẫn phản ánh font OS thật → tín hiệu liên kết tiềm tàng giữa các profile cùng máy. Engine **có** `--fingerprint-fonts-dir` (trỏ tới bộ font theo platform) nhưng app **chưa dùng** vì cần đóng gói bộ font kèm app — để dành làm sau.
+JS enumerate font vẫn phản ánh font OS thật → tín hiệu liên kết tiềm tàng giữa các profile cùng máy. App hiện có **local diagnostics** để đo font availability hash và cảnh báo font surface lớn, nhưng chưa spoof/đóng gói font pack riêng. Engine **có** `--fingerprint-fonts-dir` (trỏ tới bộ font theo platform) nhưng app **chưa dùng** vì cần đóng gói bộ font kèm app — để dành làm sau.
 
 ### 9.4 Ký số
 Chưa code-sign (Windows) / notarize (macOS) → SmartScreen / Gatekeeper cảnh báo. Cần Apple Developer (~$99/năm) + cert Windows để hết.
@@ -138,8 +139,8 @@ Chưa code-sign (Windows) / notarize (macOS) → SmartScreen / Gatekeeper cảnh
 ### 9.5 Ngoài phạm vi trình duyệt
 App chỉ lo **browser fingerprint + IP isolation**. Với marketplace (Redbubble, …) các vector link account mạnh nhất thường là **danh tính thanh toán/tax, địa chỉ, nội dung upload trùng, email/hành vi** — nằm ngoài tầm của app. Anti-detect hoàn hảo cũng không cứu nếu dùng chung payout hoặc upload design giống nhau.
 
-### 9.6 visitorId & test phụ thuộc mạng
-Đo FingerprintJS cần tải module từ CDN + origin không chặn CSP; offline thì bỏ qua (best-effort).
+### 9.6 External fingerprint test phụ thuộc mạng
+App không còn tự đo FingerprintJS visitorId trong luồng launch mặc định để tránh tạo network/cache trace không cần thiết. Kiểm tra bằng dịch vụ ngoài chỉ chạy khi người dùng bấm **Test FP**.
 
 ## 10. Kiểm thử
 Unit (Vitest): `launch-args`, `unlinkability`, `store` (+migrate/regenerate), `fingerprint-probe`, `browser-manager`, `proxy-tester`, `proxy-parse`, `identity-service`, `quarantine`. Integration (`tests/integration`, loại khỏi run mặc định): mở 2 profile seed khác nhau → assert fingerprint khác + `webdriver=false`.

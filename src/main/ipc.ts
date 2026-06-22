@@ -44,6 +44,7 @@ export function registerIpc(
   ipcMain.handle('browser:stop', (_e, id: string) => manager.stop(id));
   ipcMain.handle('browser:running', () => manager.runningIds());
   ipcMain.handle('browser:open-url', (_e, id: string, url: string) => manager.openUrl(id, url));
+  ipcMain.handle('browser:diagnostics', (_e, id: string) => manager.runDiagnostics(id));
 
   ipcMain.handle('proxy:test', (_e, proxy: ProxyConfig) => proxyTester.test(proxy));
 

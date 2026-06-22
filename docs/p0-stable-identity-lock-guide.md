@@ -9,7 +9,7 @@ Tài liệu này mô tả các chức năng P0 đã được triển khai để 
 Khi một profile chưa khóa identity được mở lần đầu với proxy:
 
 - App mở CloakBrowser với cấu hình hiện tại.
-- App đo fingerprint runtime.
+- App đo fingerprint runtime bằng local probe.
 - App test proxy để lấy actual exit IP.
 - Nếu proxy test thành công và có exit IP, app lưu `resolvedIdentity`.
 - Profile được đánh dấu `identityLocked = true`.
@@ -26,7 +26,7 @@ Các dữ liệu được lưu trong `resolvedIdentity`:
 - Timezone và locale đã áp dụng.
 - WebRTC IP đã freeze.
 - Fingerprint snapshot.
-- FingerprintJS visitor ID nếu đo được.
+- Local diagnostics có thể đo thêm canvas/audio/font khi người dùng chạy thủ công.
 
 ### 2. Tắt auto-update CloakBrowser binary
 
@@ -162,7 +162,7 @@ Với profile đã khóa:
 ```mermaid
 flowchart TD
   A["User clicks Open"] --> B["Launch with current profile config"]
-  B --> C["Probe fingerprint and visitorId"]
+  B --> C["Probe local fingerprint"]
   C --> D{"Profile has proxy?"}
   D -- "No" --> E["Keep profile Unlocked"]
   D -- "Yes" --> F["Test proxy and resolve exit IP"]
@@ -247,8 +247,8 @@ Kết quả:
 
 ## Giới Hạn Hiện Tại
 
-- Chưa thêm các advanced fingerprint option kiểu BitBrowser như canvas/audio/fonts/media devices/custom GPU list.
-- Chưa chuyển external FingerprintJS probe sang diagnostic-only mode.
+- Chưa thêm các advanced fingerprint option kiểu BitBrowser như media devices/custom GPU list.
+- Local diagnostics đã đo canvas/audio/font hash, nhưng chưa spoof/đóng gói font pack riêng.
 - Chưa kiểm tra DNS leak thật sự.
 - Metadata IP từ `ipwho.is` là best-effort; nếu service fail, app vẫn có thể lock bằng actual exit IP nếu `api.ipify.org` trả IP thành công.
 - Locked identity yêu cầu proxy sticky. Proxy rotating có thể bị block nếu exit IP đổi.
@@ -260,4 +260,3 @@ Kết quả:
 - Không reset identity nếu account đã login và đang hoạt động ổn.
 - Không update browser binary cho profile đã khóa nếu không có kế hoạch migrate identity.
 - Sau khi tạo profile, nên mở trang kiểm tra fingerprint thủ công nếu cần xác nhận sâu hơn.
-

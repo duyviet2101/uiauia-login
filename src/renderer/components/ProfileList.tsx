@@ -10,6 +10,7 @@ interface Props {
   onLaunch: (id: string) => void;
   onStop: (id: string) => void;
   onTest: (id: string) => void;
+  onDiagnostics: (id: string) => void;
   onEdit: (id: string) => void;
   onDuplicate: (id: string) => void;
   onRegenerateSeed: (id: string) => void;
@@ -24,7 +25,7 @@ function formatLastOpened(iso: string | null): string {
 
 export function ProfileList({
   profiles, warnings, busy,
-  onLaunch, onStop, onTest, onEdit, onDuplicate, onRegenerateSeed, onResetIdentity, onDelete,
+  onLaunch, onStop, onTest, onDiagnostics, onEdit, onDuplicate, onRegenerateSeed, onResetIdentity, onDelete,
 }: Props) {
   const [expanded, setExpanded] = useState<string | null>(null);
 
@@ -141,6 +142,14 @@ export function ProfileList({
                 Test FP ↗
               </button>
               <button
+                onClick={() => onDiagnostics(p.id)}
+                disabled={isBusy}
+                title="Chạy probe local cho canvas/audio/font"
+                className="rounded-lg bg-cyan-700 px-3 py-1 text-xs font-medium text-white hover:bg-cyan-600 disabled:opacity-60 transition-colors"
+              >
+                Diagnostics
+              </button>
+              <button
                 onClick={() => onEdit(p.id)}
                 disabled={isBusy}
                 className="rounded-lg bg-slate-600 px-3 py-1 text-xs text-white hover:bg-slate-500 disabled:opacity-60 transition-colors"
@@ -172,7 +181,7 @@ export function ProfileList({
 
             {isOpen && (
               <div className="mt-2 pl-5 text-white">
-                <FingerprintPanel fingerprint={p.fingerprint} visitorId={p.visitorId} platform={p.platform} />
+                <FingerprintPanel fingerprint={p.fingerprint} visitorId={p.visitorId} diagnostics={p.diagnostics} platform={p.platform} />
                 <button
                   onClick={() => (p.identityLocked ? onResetIdentity(p.id) : onRegenerateSeed(p.id))}
                   disabled={isBusy || p.running}

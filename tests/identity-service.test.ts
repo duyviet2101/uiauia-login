@@ -40,6 +40,7 @@ function profile(over: Partial<Profile> = {}): Profile {
     userDataDir: '/tmp/p1',
     fingerprint: fp,
     visitorId: 'vid',
+    diagnostics: null,
     identityLocked: true,
     resolvedIdentity,
     lastProxyCheck: null,
