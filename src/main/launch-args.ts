@@ -16,10 +16,6 @@ export interface Display {
 /** Fallback when the real display can't be read (e.g. unit tests). */
 const DEFAULT_DISPLAY: Display = { width: 1920, height: 1080 };
 
-// A maximized window's content height = screen height − taskbar (~48px) − Chrome
-// UI (~85px: tabs + omnibox + bookmarks). cloakbrowser uses the same 1080→947.
-const WINDOW_CHROME_OVERHEAD = 133;
-
 export interface HardwareProfile {
   hardwareConcurrency: number;
   deviceMemory: number | null;
@@ -91,6 +87,10 @@ export function buildLaunchArgs(p: Profile, display: Display = DEFAULT_DISPLAY):
     // and trips FingerprintJS "Virtual machine" (screen != viewport).
     `--fingerprint-screen-width=${display.width}`,
     `--fingerprint-screen-height=${display.height}`,
+    // Let Chromium/Windows own the native window geometry. Combined with a
+    // null Playwright viewport, this avoids re-applying device metrics whenever
+    // a new tab is created (which can unmaximize/reposition headed windows).
+    '--start-maximized',
   ];
 
   // Vary CPU/RAM per profile (no window-geometry coupling). Frozen for warmed-up
@@ -108,9 +108,10 @@ export function buildLaunchArgs(p: Profile, display: Display = DEFAULT_DISPLAY):
   return {
     userDataDir: p.userDataDir,
     headless: false,
-    // Viewport matches the real display so screen == viewport (no "Virtual
-    // machine" flag) and the window opens at a realistic maximized size.
-    viewport: { width: display.width, height: Math.max(display.height - WINDOW_CHROME_OVERHEAD, 480) },
+    // A fixed viewport enables Playwright's device-metrics override. On the
+    // patched Windows browser that override can fight fullscreen/maximize on
+    // each new tab, moving the native window. null keeps sizing fully native.
+    viewport: null,
     // Drop cloakbrowser's default stealth args (which include --no-sandbox,
     // unneeded on desktop and triggers Chrome's "unsupported flag" warning).
     // The 58 C++ stealth patches live in the binary and stay active regardless.

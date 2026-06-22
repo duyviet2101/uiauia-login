@@ -91,12 +91,15 @@ describe('buildLaunchArgs', () => {
   // differs from the real monitor makes the binary's window-position patch fight
   // fullscreen (window drifts off-screen) and trips FingerprintJS "Virtual machine".
 
-  it('screen + viewport come from the real display, not the seed', () => {
+  it('screen comes from the real display; viewport is null so the user controls the window', () => {
     const display = { width: 1366, height: 768 };
     const o = buildLaunchArgs(profile({ seed: 4242042, fingerprint: null }), display);
     expect(flag(o.args, '--fingerprint-screen-width')).toBe('1366');
     expect(flag(o.args, '--fingerprint-screen-height')).toBe('768');
-    expect(o.viewport).toEqual({ width: 1366, height: 768 - 133 });
+    // A forced viewport applies a CDP device-metrics override that fights manual
+    // fullscreen/resize on a headed window. null = native, user-controlled window.
+    expect(o.viewport).toBeNull();
+    expect(o.args).toContain('--start-maximized');
   });
 
   it('screen is constant across seeds for the same display', () => {
@@ -111,7 +114,8 @@ describe('buildLaunchArgs', () => {
     const o = buildLaunchArgs(profile());
     expect(flag(o.args, '--fingerprint-screen-width')).toBe('1920');
     expect(flag(o.args, '--fingerprint-screen-height')).toBe('1080');
-    expect(o.viewport).toEqual({ width: 1920, height: 947 });
+    expect(o.viewport).toBeNull();
+    expect(o.args).toContain('--start-maximized');
   });
 
   // --- cores/memory DO still vary per profile (no window-geometry coupling) ---
