@@ -40,3 +40,37 @@ describe('MacUpdater.check', () => {
     expect((await u.check('0.2.2')).available).toBe(false);
   });
 });
+
+import { mkdtempSync, readFileSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
+
+describe('MacUpdater.start + apply', () => {
+  const bytes = new Uint8Array([10, 20, 30, 40, 50]);
+  const fetcher = (async (url: string | URL) => {
+    if (String(url).includes('/releases/latest')) {
+      return new Response(JSON.stringify({
+        tag_name: 'v9.9.9',
+        assets: [{ name: 'App-9.9.9-arm64.dmg', browser_download_url: 'https://x/arm.dmg' }],
+      }), { status: 200 });
+    }
+    return new Response(bytes, { status: 200, headers: { 'content-length': String(bytes.length) } });
+  }) as typeof fetch;
+
+  it('tải dmg ra đĩa + báo % rồi apply mở đúng file', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mu-'));
+    const opened: string[] = [];
+    const u = new MacUpdater('o/r', {
+      arch: 'arm64', fetcher, tmpDir: () => dir,
+      openPath: async (p) => { opened.push(p); return ''; },
+    });
+    const pct: number[] = [];
+    await u.check('0.0.1');
+    const r = await u.start((p) => pct.push(p));
+    expect(r.ready).toBe(true);
+    expect(readFileSync(r.artifactPath!)).toEqual(Buffer.from(bytes));
+    expect(pct.at(-1)).toBe(100);
+    await u.apply();
+    expect(opened).toEqual([r.artifactPath]);
+  });
+});

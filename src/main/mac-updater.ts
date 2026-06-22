@@ -1,5 +1,8 @@
 import type { GithubAsset, UpdaterAdapter } from './types';
 import { isNewer } from './semver';
+import { createWriteStream } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 
 /** Chọn file .dmg khớp arch ('arm64' | 'x64'); fallback dmg không hậu tố, rồi dmg đầu tiên. */
 export function pickDmgAsset(assets: GithubAsset[], arch: string): GithubAsset | null {
@@ -51,11 +54,50 @@ export class MacUpdater implements UpdaterAdapter {
     return { available: !!latest && isNewer(latest, current), latest };
   }
 
-  async start(_onProgress: (percent: number) => void): Promise<{ ready: boolean; artifactPath?: string }> {
-    throw new Error('start not implemented yet');
+  private async openPathFn(p: string): Promise<string> {
+    if (this.opts.openPath) return this.opts.openPath(p);
+    const { shell } = await import('electron');
+    return shell.openPath(p);
+  }
+
+  private async openExternalFn(u: string): Promise<void> {
+    if (this.opts.openExternal) return this.opts.openExternal(u);
+    const { shell } = await import('electron');
+    return shell.openExternal(u);
+  }
+
+  async start(onProgress: (percent: number) => void): Promise<{ ready: boolean; artifactPath?: string }> {
+    if (!this.dmgUrl) {
+      if (this.htmlUrl) await this.openExternalFn(this.htmlUrl); // fallback: mở trang release
+      return { ready: false };
+    }
+    const res = await this.fetcher(this.dmgUrl);
+    if (!res.ok || !res.body) throw new Error(`Download failed: ${res.status}`);
+    const total = Number(res.headers.get('content-length') ?? 0);
+    const dest = join(this.opts.tmpDir ? this.opts.tmpDir() : tmpdir(), 'CloakBrowserManager-update.dmg');
+    const file = createWriteStream(dest);
+    let received = 0;
+    const reader = res.body.getReader();
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        file.write(Buffer.from(value));
+        received += value.length;
+        if (total > 0) onProgress(Math.round((received / total) * 100));
+      }
+    } finally {
+      file.end();
+    }
+    await new Promise<void>((resolve, reject) => {
+      file.on('finish', () => resolve());
+      file.on('error', reject);
+    });
+    this.downloadedPath = dest;
+    return { ready: true, artifactPath: dest };
   }
 
   async apply(): Promise<void> {
-    throw new Error('apply not implemented yet');
+    if (this.downloadedPath) await this.openPathFn(this.downloadedPath);
   }
 }
