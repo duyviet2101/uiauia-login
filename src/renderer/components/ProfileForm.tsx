@@ -13,6 +13,8 @@ export interface ProfileFormValues {
   timezone: string | null;
   locale: string | null;
   startUrl: string | null;
+  blockGeolocation: boolean;
+  doNotTrack: boolean;
   windowCustomization: WindowCustomizationInput;
 }
 
@@ -53,6 +55,8 @@ export function ProfileForm({ initial, onSubmit, onCancel }: Props) {
   const [timezone, setTimezone] = useState(initial?.timezone ?? '');
   const [locale, setLocale] = useState(initial?.locale ?? '');
   const [startUrl, setStartUrl] = useState(initial?.startUrl ?? '');
+  const [blockGeolocation, setBlockGeolocation] = useState(initial?.blockGeolocation ?? true);
+  const [doNotTrack, setDoNotTrack] = useState(initial?.doNotTrack ?? false);
   const [windowCustomizationEnabled, setWindowCustomizationEnabled] = useState(initial?.windowCustomization.enabled ?? true);
   const [windowColor, setWindowColor] = useState(initial?.windowCustomization.color ?? '');
 
@@ -111,6 +115,8 @@ export function ProfileForm({ initial, onSubmit, onCancel }: Props) {
         timezone: timezone.trim() || null,
         locale: locale.trim() || null,
         startUrl: startUrl.trim() || null,
+        blockGeolocation,
+        doNotTrack,
         windowCustomization: {
           enabled: windowCustomizationEnabled,
           color: windowColor || null,
@@ -259,6 +265,32 @@ export function ProfileForm({ initial, onSubmit, onCancel }: Props) {
         <div>
           <label className={labelCls}>Trang khởi đầu</label>
           <input className={inputCls} value={startUrl} onChange={(e) => setStartUrl(e.target.value)} placeholder="https://www.google.com (mặc định)" />
+        </div>
+
+        <div className="space-y-2 rounded-lg border border-slate-700 bg-slate-900/40 p-3">
+          <p className="text-xs font-medium text-slate-400">Quyền riêng tư</p>
+          <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              className="accent-blue-500"
+              checked={blockGeolocation}
+              onChange={(e) => setBlockGeolocation(e.target.checked)}
+            />
+            Chặn định vị (geolocation) — từ chối mọi yêu cầu vị trí
+          </label>
+          <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              className="accent-blue-500"
+              checked={doNotTrack}
+              onChange={(e) => setDoNotTrack(e.target.checked)}
+            />
+            Do Not Track (DNT) — gửi tín hiệu “không theo dõi”
+          </label>
+          <p className="text-[11px] text-slate-500">
+            Ghi vào Preferences thật của Chromium (không phải JS hack). Chặn định vị triệt tiêu rò vị trí thật khi lỡ bấm Cho phép.
+            DNT để tắt sẽ giống số đông hơn. Sửa được cả khi identity đã khoá.
+          </p>
         </div>
 
         <div className="space-y-3 rounded-lg border border-slate-700 bg-slate-900/40 p-3">

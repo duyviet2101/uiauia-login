@@ -108,7 +108,13 @@ export default function App() {
         await api.updateProfile(
           editing.id,
           editing.identityLocked
-            ? { name: values.name, startUrl: values.startUrl, windowCustomization: values.windowCustomization }
+            ? {
+                name: values.name,
+                startUrl: values.startUrl,
+                windowCustomization: values.windowCustomization,
+                blockGeolocation: values.blockGeolocation,
+                doNotTrack: values.doNotTrack,
+              }
             : values,
         );
         addToast('success', `Đã lưu “${values.name}”.`);
