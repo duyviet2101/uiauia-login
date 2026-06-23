@@ -51,6 +51,9 @@ export interface BrowserPreferencesOptions {
  *      genuine Preferences keys. Verified 2026-06-22: `geolocation: 2` yields a
  *      "denied" permission and `enable_do_not_track: true` yields DNT "1" —
  *      undetectable as a JS override. Merges idempotently into any existing file.
+ *   3. Local Font Access — `local_fonts: 2` blocks queryLocalFonts() so a page
+ *      can never enumerate the real host font list (incl. user-installed fonts),
+ *      which --fingerprint-fonts-dir does NOT cover. Always on; no legit use here.
  */
 export function prepareBrowserPreferences(userDataDir: string, opts: BrowserPreferencesOptions = {}): void {
   const path = join(userDataDir, 'Default', 'Preferences');
@@ -65,8 +68,14 @@ export function prepareBrowserPreferences(userDataDir: string, opts: BrowserPref
 
   objectAt(preferences, 'session').restore_on_startup = 1;
 
+  const contentSettings = objectAt(objectAt(preferences, 'profile'), 'default_content_setting_values');
+
+  // Local Font Access (queryLocalFonts) would expose the real host font list,
+  // including user-installed fonts — and --fingerprint-fonts-dir does not cover
+  // it. No legit use for these profiles, so deny it by default (no prompt).
+  contentSettings.local_fonts = 2;
+
   if (opts.blockGeolocation !== undefined) {
-    const contentSettings = objectAt(objectAt(preferences, 'profile'), 'default_content_setting_values');
     if (opts.blockGeolocation) contentSettings.geolocation = 2;
     else delete contentSettings.geolocation;
   }

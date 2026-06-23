@@ -71,4 +71,18 @@ describe('prepareBrowserPreferences', () => {
     expect(p.profile?.default_content_setting_values?.geolocation).toBeUndefined();
     expect(p.enable_do_not_track).toBeUndefined();
   });
+
+  it('always blocks the Local Font Access permission (local_fonts=2)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'browser-preferences-'));
+    prepareBrowserPreferences(dir); // even with no privacy opts
+    expect(readPrefs(dir).profile.default_content_setting_values.local_fonts).toBe(2);
+  });
+
+  it('blocks Local Font Access alongside an explicit geolocation block', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'browser-preferences-'));
+    prepareBrowserPreferences(dir, { blockGeolocation: true, doNotTrack: false });
+    const csv = readPrefs(dir).profile.default_content_setting_values;
+    expect(csv.local_fonts).toBe(2);
+    expect(csv.geolocation).toBe(2);
+  });
 });
