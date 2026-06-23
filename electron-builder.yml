@@ -24,6 +24,14 @@ asarUnpack:
   - node_modules/koffi/**/*
   - node_modules/@koromix/koffi-*/**/*
 
+# Bundle a complete Windows font set so windows-spoof profiles sandbox font
+# enumeration to it (hides host fonts, incl. user-installed). Populated only in
+# CI from a Windows runner (see .github/workflows/release.yml) — the repo ships
+# just a .gitkeep, so local/dev builds carry no fonts and fall back to the OS set.
+extraResources:
+  - from: build/fonts/windows
+    to: fonts/windows
+
 # macOS
 mac:
   category: public.app-category.utilities

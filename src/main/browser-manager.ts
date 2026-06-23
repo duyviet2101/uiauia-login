@@ -10,6 +10,7 @@ import { proxyWarnings } from './unlinkability';
 import { IdentityDriftError, type Fingerprint, type FingerprintDiagnostics, type LaunchResult } from './types';
 import { NullProfileWindowService, type ProfileWindowService } from './profile-window-service';
 import { prepareBrowserPreferences, type BrowserPreferencesOptions } from './browser-preferences';
+import { resolveWindowsFontsDir } from './fonts-dir';
 
 type Launcher = (opts: LaunchPersistentContextOptions) => Promise<BrowserContext>;
 type Capturer = (page: Page) => Promise<Fingerprint>;
@@ -33,6 +34,9 @@ export class BrowserManager extends EventEmitter {
     private displayProvider: () => Display = () => ({ width: 1920, height: 1080 }),
     private profileWindowService: ProfileWindowService = new NullProfileWindowService(),
     private preferencesPreparer: PreferencesPreparer = prepareBrowserPreferences,
+    /** Bundled Windows font dir for --fingerprint-fonts-dir (hides host fonts on
+     *  windows-spoof profiles). Resolves to null when no complete bundle ships. */
+    private fontsDirProvider: () => string | null = resolveWindowsFontsDir,
   ) { super(); }
 
   async launch(id: string, opts: { force?: boolean } = {}): Promise<LaunchResult> {
@@ -57,7 +61,7 @@ export class BrowserManager extends EventEmitter {
       console.warn(`[browser-preferences] Could not prepare profile ${id}:`, error);
     }
 
-    const ctx = await this.launcher(buildLaunchArgs(profile, this.displayProvider()));
+    const ctx = await this.launcher(buildLaunchArgs(profile, this.displayProvider(), this.fontsDirProvider()));
     this.running.set(id, ctx);
     ctx.on('close', () => {
       this.profileWindowService.detach(id);

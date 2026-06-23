@@ -6,3 +6,8 @@ release/
 .DS_Store
 profiles/
 cloak.json
+
+# Windows fonts are bundled at release time from a Windows CI runner, never
+# committed (Microsoft font license). Keep the folder via .gitkeep.
+build/fonts/windows/*
+!build/fonts/windows/.gitkeep
