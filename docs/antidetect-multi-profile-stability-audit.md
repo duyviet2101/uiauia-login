@@ -10,6 +10,16 @@ However, it does not yet fully guarantee long-term identity stability for multi-
 
 The main fix is to add an `identityLocked` mode: resolve and store the actual identity applied during the first setup, then launch future sessions from that frozen identity and warn or block when anything drifts.
 
+## Update — 2026-06-23: Fingerprint hardening shipped
+
+Branch `feat/fingerprint-hardening` đã xử lý nhóm Geo / DNT / IPv6 / Fonts trong các gaps bên dưới (TDD; chi tiết: `docs/superpowers/plans/2026-06-22-fingerprint-hardening.md`, `docs/TECHNICAL.md` mục 4.2 + 9.7):
+
+- ✅ **Geo permission** — `blockGeolocation` (mặc định ON) ghi `geolocation:2` vào Chrome Preferences trước mỗi launch → vị trí bị denied. Match-city bị loại (`--fingerprint-location` hỏng trên binary Mac).
+- ✅ **Do Not Track** — `doNotTrack` (mặc định OFF) qua `enable_do_not_track`.
+- ✅ **Fonts** — `--fingerprint-fonts-dir` sandbox font host trên profile windows-spoof (bundle font Windows nạp từ CI runner, không commit vào repo). Giấu cả font user cài thêm.
+- ⚠️ **IPv6 leak** — cảnh báo best-effort (probe `api6.ipify.org` qua proxy) → warning `medium` trong `unlinkability.ts`.
+- ❌ **DNS true leak-test** — vẫn **ngoài phạm vi** (cần API/callback ngoài log resolver IP).
+
 ## Design Principles
 
 1. A profile must behave like a stable virtual device, not a freshly randomized browser every time it opens.

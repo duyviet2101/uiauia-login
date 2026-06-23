@@ -46,10 +46,11 @@ Profile {
   platform: 'windows' | 'macos',
   proxy: { type, host, port, user?, pass? } | null,
   geoip, timezone, locale, startUrl,
+  blockGeolocation, doNotTrack,         // quyền riêng tư qua Chrome Preferences (mục 4.2)
   userDataDir,                          // phiên bền, riêng từng profile
   fingerprint, visitorId,               // đo ở lần mở đầu
   identityLocked, resolvedIdentity,     // khoá danh tính (mục 6)
-  lastProxyCheck,                       // cache kết quả proxy (TTL 10')
+  lastProxyCheck,                       // cache kết quả proxy (TTL 10') + cờ ipv6 nếu lộ
   createdAt, lastOpenedAt
 }
 ```
@@ -58,7 +59,7 @@ Migration: `store.migrate()` (SCHEMA_VERSION) tự bù field mới cho profile t
 
 ## 4. Lõi chống nhận diện (`launch-args.ts`)
 
-`buildLaunchArgs(profile)` → tham số cho `launchPersistentContext`:
+`buildLaunchArgs(profile, display?, fontsDir?)` → tham số cho `launchPersistentContext`:
 
 ```ts
 args: [
@@ -70,6 +71,7 @@ args: [
   `--fingerprint-hardware-concurrency=${cores}`,
   ...(deviceMemory ? [`--fingerprint-device-memory=${deviceMemory}`] : []),
   ...(proxy && !geoip ? ['--fingerprint-webrtc-ip=auto'] : []),
+  ...(fontsDir && platform === 'windows' ? [`--fingerprint-fonts-dir=${fontsDir}`] : []),  // sandbox font (mục 4.2)
 ]
 stealthArgs: false,   // bỏ default của cloakbrowser (gồm --no-sandbox, không cần trên desktop)
 proxy, geoip, timezone, locale, headless: false
@@ -84,6 +86,13 @@ Binary mặc định để `screen` (1920×1080 Win / 1440×900 Mac), `hardwareC
 
 - `geoip: true` (mặc định khi có proxy) tự khớp timezone/locale theo IP exit **và** tự inject `--fingerprint-webrtc-ip`. Cần `mmdb-lib` + DB GeoLite2 (cloakbrowser tự tải).
 - Override `timezone`/`locale` thủ công sẽ thắng geoip.
+
+### 4.2 Quyền riêng tư & font sandbox
+
+Hai cơ chế chạy **trước launch**, ghi vào Chrome thật (không phải JS hack):
+
+- **Geo-block + DNT (`browser-preferences.ts`):** seed `Default/Preferences` idempotent trước mỗi lần mở (gộp chung với việc set search provider / restore session, một lần ghi atomic). `blockGeolocation` → `profile.default_content_setting_values.geolocation = 2` (mọi yêu cầu vị trí bị **denied** — triệt tiêu rò vị trí thật qua WiFi-AP khi user lỡ bấm Allow); `doNotTrack` → `enable_do_not_track`. Đã kiểm chứng 2026-06-22: pref thật, undetectable. Mặc định geo-block **ON**, DNT **OFF** (off giống số đông hơn). Hai field này **không** identity-impacting → sửa được cả khi profile đã khoá.
+- **Font sandbox (`--fingerprint-fonts-dir`, `fonts-dir.ts`):** chỉ với profile **windows-spoof** và khi app có bundle font Windows đủ (≥50 file). Sandbox enumeration về đúng bộ bundle → **giấu hết font host** kể cả font user cài thêm (Probe C: 20 font host → 1). Bundle nạp từ CI (runner Windows copy `C:\Windows\Fonts`), **không commit vào repo** (license MS); thiếu/partial bundle → tự bỏ qua, dùng font OS (an toàn hơn bộ thưa giả lộ liễu). "Match city" theo `--fingerprint-location` đã loại: **hỏng trên binary Mac** (Probe A).
 
 ## 5. Đo & theo dõi fingerprint
 
@@ -103,8 +112,8 @@ Vấn đề: proxy đổi IP, cập nhật binary, hay sửa cấu hình giữa 
 
 ## 7. Cảnh báo unlinkability (`unlinkability.ts`)
 
-- `level: high` — profile **không proxy** (dùng IP máy chủ).
-- `level: medium` — **trùng host proxy** với profile khác (cùng IP).
+- `level: high` — profile **không proxy** (dùng IP máy chủ); exit IP đã khoá bị đổi hoặc trùng với profile khác.
+- `level: medium` — **trùng host proxy** với profile khác (cùng IP); cùng ASN/ISP+vị trí; **IPv6 lộ ra ngoài** (đo best-effort qua `api6.ipify.org` lúc test proxy — proxy có thể chỉ cover IPv4, mục 9.7).
 
 Hiển thị badge cảnh báo trên từng card.
 
@@ -130,8 +139,8 @@ Hệ quả & sắc thái:
 **Trước đây:** `hardwareConcurrency`, `deviceMemory`, độ phân giải màn hình kẹt cứng (8 / 8 / 1920×1080) ở mọi seed → dùng chung giữa các profile. (Tài liệu cũ ghi sai là "không có flag trong 0.3.31" — flag `--fingerprint-screen-width/height`, `-hardware-concurrency`, `-device-memory` **có sẵn** trong 0.3.31.)
 **Hiện tại:** `deriveHardwareProfile` (mục 4.1) truyền explicit các flag này theo seed → **biến thiên giữa các profile** trên cả Win lẫn Mac. Caveat: `navigator.deviceMemory` đọc ra `null` trên `about:blank` (cần verify trên trang HTTPS thật); flag vẫn được truyền.
 
-### 9.3 Font enumeration
-JS enumerate font vẫn phản ánh font OS thật → tín hiệu liên kết tiềm tàng giữa các profile cùng máy. App hiện có **local diagnostics** để đo font availability hash và cảnh báo font surface lớn, nhưng chưa spoof/đóng gói font pack riêng. Engine **có** `--fingerprint-fonts-dir` (trỏ tới bộ font theo platform) nhưng app **chưa dùng** vì cần đóng gói bộ font kèm app — để dành làm sau.
+### 9.3 Font enumeration — ĐÃ sandbox (tùy chọn, windows-spoof)
+`--fingerprint-fonts-dir` đã được wire (`fonts-dir.ts` + mục 4.2): profile windows-spoof sandbox font enumeration về bộ bundle → giấu font host (kể cả font user cài thêm). **Điều kiện:** app phải kèm bundle font Windows đủ (≥50 file), nạp từ CI runner Windows (`release.yml` job `fonts`; **không commit vào repo** — license MS). Build dev/local không có bundle → fallback font OS thật (residual: font host vẫn lộ & giống nhau giữa các profile cùng máy — dùng diagnostics để theo dõi). Profile macOS-spoof: không áp. Bộ bundle thiếu còn hại hơn không bundle (vân tay thưa) → resolver yêu cầu ≥50 file mới bật.
 
 ### 9.4 Ký số
 Chưa code-sign (Windows) / notarize (macOS) → SmartScreen / Gatekeeper cảnh báo. Cần Apple Developer (~$99/năm) + cert Windows để hết.
@@ -141,6 +150,11 @@ App chỉ lo **browser fingerprint + IP isolation**. Với marketplace (Redbubbl
 
 ### 9.6 External fingerprint test phụ thuộc mạng
 App không còn tự đo FingerprintJS visitorId trong luồng launch mặc định để tránh tạo network/cache trace không cần thiết. Kiểm tra bằng dịch vụ ngoài chỉ chạy khi người dùng bấm **Test FP**.
+
+### 9.7 Geo / DNT / IPv6 / DNS
+- **Geo:** chỉ **chặn** (không match theo city) — `--fingerprint-location` hỏng trên binary Mac 25-patch (Probe A). Chặn qua Preferences (mục 4.2) đủ để không lộ vị trí thật.
+- **IPv6:** chỉ **cảnh báo best-effort** (thấy IPv6 reachable qua browser proxied). **Không** khẳng định chắc leak (cần biết IP thật của máy). Proxy chỉ cover IPv4 + còn IPv6 route = rủi ro → user tự kiểm.
+- **DNS true leak-test:** **ngoài phạm vi** — cần hạ tầng callback/API ngoài (proxycheck/bash.ws) log resolver IP. Không làm offline; để sau nếu cắm API.
 
 ## 10. Kiểm thử
 Unit (Vitest): `launch-args`, `unlinkability`, `store` (+migrate/regenerate), `fingerprint-probe`, `browser-manager`, `proxy-tester`, `proxy-parse`, `identity-service`, `quarantine`. Integration (`tests/integration`, loại khỏi run mặc định): mở 2 profile seed khác nhau → assert fingerprint khác + `webdriver=false`.
