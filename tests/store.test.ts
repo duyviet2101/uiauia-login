@@ -109,6 +109,20 @@ describe('ProfileStore', () => {
     expect(p.diagnostics).toBeNull();
   });
 
+  it('create defaults blockGeolocation on and doNotTrack off', async () => {
+    const store = await makeStore();
+    const p = await store.create({ name: 'A' });
+    expect(p.blockGeolocation).toBe(true);
+    expect(p.doNotTrack).toBe(false);
+  });
+
+  it('create honors explicit blockGeolocation/doNotTrack input', async () => {
+    const store = await makeStore();
+    const p = await store.create({ name: 'A', blockGeolocation: false, doNotTrack: true });
+    expect(p.blockGeolocation).toBe(false);
+    expect(p.doNotTrack).toBe(true);
+  });
+
   it('locked profile rejects identity-impacting updates', async () => {
     const store = await makeStore();
     const p = await store.create({ name: 'A', proxy: { type: 'http', host: 'h', port: 80 } });
@@ -218,5 +232,26 @@ describe('ProfileStore', () => {
     await secondLoad.init();
     expect(secondLoad.get('older')!.windowCustomization.number).toBe(1);
     expect(secondLoad.get('newer')!.windowCustomization.number).toBe(2);
+  });
+
+  it('migrates legacy profiles to default blockGeolocation + doNotTrack', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cloak-privacy-'));
+    writeFileSync(join(dir, 'cloak.json'), JSON.stringify({
+      version: 5,
+      profiles: [{
+        id: 'legacy', name: 'legacy', seed: 1, platform: 'windows', proxy: null, geoip: true,
+        timezone: null, locale: null, startUrl: null, userDataDir: join(dir, 'profiles', 'legacy'),
+        fingerprint: null, visitorId: null, diagnostics: null, identityLocked: false,
+        resolvedIdentity: null, lastProxyCheck: null,
+        windowCustomization: { enabled: true, number: 1, color: '#2563EB' },
+        createdAt: '2026-01-01', lastOpenedAt: null,
+      }],
+    }));
+
+    const store = new ProfileStore(dir);
+    await store.init();
+    const p = store.get('legacy')!;
+    expect(p.blockGeolocation).toBe(true);
+    expect(p.doNotTrack).toBe(false);
   });
 });

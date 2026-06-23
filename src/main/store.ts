@@ -12,7 +12,7 @@ interface Opts { seedGen?: () => number; idGen?: () => string }
 const defaultSeed = () => Math.floor(Math.random() * 99_990_000) + 10_000;
 
 /** Bump when the Profile shape changes; `migrate()` backfills older records. */
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 6;
 const LOCKED_IDENTITY_FIELDS = ['proxy', 'geoip', 'timezone', 'locale', 'platform'] as const;
 
 export class ProfileStore {
@@ -49,6 +49,8 @@ export class ProfileStore {
       if (p.identityLocked === undefined) { p.identityLocked = false; changed = true; }
       if (p.resolvedIdentity === undefined) { p.resolvedIdentity = null; changed = true; }
       if (p.lastProxyCheck === undefined) { p.lastProxyCheck = null; changed = true; }
+      if (p.blockGeolocation === undefined) { p.blockGeolocation = true; changed = true; }
+      if (p.doNotTrack === undefined) { p.doNotTrack = false; changed = true; }
       const raw = p.windowCustomization as unknown;
       const value = raw && typeof raw === 'object' ? raw as Record<string, unknown> : null;
       const number = value?.number;
@@ -111,6 +113,8 @@ export class ProfileStore {
       identityLocked: false,
       resolvedIdentity: null,
       lastProxyCheck: null,
+      blockGeolocation: input.blockGeolocation ?? true,
+      doNotTrack: input.doNotTrack ?? false,
       windowCustomization: createWindowCustomization(windowNumber, input.windowCustomization),
       createdAt: new Date().toISOString(),
       lastOpenedAt: null,

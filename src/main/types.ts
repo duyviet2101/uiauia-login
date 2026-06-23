@@ -100,6 +100,10 @@ export interface Profile {
   identityLocked: boolean;
   resolvedIdentity: ResolvedIdentity | null;
   lastProxyCheck: ProxyCheckSnapshot | null;
+  /** Block the geolocation permission via seeded Chrome Preferences (default on). */
+  blockGeolocation: boolean;
+  /** Send the navigator.doNotTrack / DNT header via seeded Chrome Preferences (default off). */
+  doNotTrack: boolean;
   windowCustomization: WindowCustomization;
   createdAt: string;
   lastOpenedAt: string | null;
@@ -113,6 +117,8 @@ export interface CreateProfileInput {
   timezone?: string | null;
   locale?: string | null;
   startUrl?: string | null;
+  blockGeolocation?: boolean;
+  doNotTrack?: boolean;
   windowCustomization?: WindowCustomizationInput;
 }
 

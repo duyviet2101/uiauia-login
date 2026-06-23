@@ -44,6 +44,8 @@ function profile(over: Partial<Profile> = {}): Profile {
     identityLocked: true,
     resolvedIdentity,
     lastProxyCheck: null,
+    blockGeolocation: true,
+    doNotTrack: false,
     windowCustomization: { enabled: true, number: 1, color: '#2563EB' },
     createdAt: '',
     lastOpenedAt: null,
