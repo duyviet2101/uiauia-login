@@ -9,29 +9,6 @@ export function toProxyUrl(p: ProxyConfig): string {
   return `${p.type}://${auth}${p.host}:${p.port}`;
 }
 
-/**
- * CloakBrowser needs the credential-bearing URL for GeoIP/WebRTC resolution,
- * but its inline HTTP auth currently only covers HTTPS CONNECT reliably. Give
- * Playwright the same HTTP proxy as a structured launch override so ordinary
- * HTTP requests (including Chromium's startup connectivity check) are
- * authenticated too and never trigger the native username/password prompt.
- *
- * Keep SOCKS5 on CloakBrowser's native path: Playwright does not support
- * username/password authentication for SOCKS proxies.
- */
-export function toPlaywrightHttpProxy(p: ProxyConfig): {
-  server: string;
-  username: string;
-  password: string;
-} | undefined {
-  if (p.type !== 'http' || !p.username) return undefined;
-  return {
-    server: `http://${p.host}:${p.port}`,
-    username: p.username,
-    password: p.password ?? '',
-  };
-}
-
 export interface Display {
   width: number;
   height: number;
@@ -97,7 +74,6 @@ export function buildLaunchArgs(p: Profile, display: Display = DEFAULT_DISPLAY, 
   const proxy = locked?.proxy ?? p.proxy;
   const timezone = locked ? locked.timezone : p.timezone;
   const locale = locked ? locked.locale : p.locale;
-  const playwrightHttpProxy = proxy ? toPlaywrightHttpProxy(proxy) : undefined;
   const args = [
     `--fingerprint=${seed}`,
     // Per-profile spoofed OS. 'windows' makes the binary derive a varied UA/GPU
@@ -159,10 +135,12 @@ export function buildLaunchArgs(p: Profile, display: Display = DEFAULT_DISPLAY, 
       // unsupported `--no-sandbox` flag independently of CloakBrowser's
       // stealthArgs. Desktop Chromium supports its sandbox, so keep it enabled.
       chromiumSandbox: true,
-      // This is deliberately an override in addition to the top-level proxy
-      // URL. The URL remains available to CloakBrowser's GeoIP resolver, while
-      // the structured object makes Playwright handle HTTP 407 challenges.
-      ...(playwrightHttpProxy ? { proxy: playwrightHttpProxy } : {}),
+      // NO Playwright `proxy` here on purpose. CloakBrowser turns the top-level
+      // proxy URL (above) into `--proxy-server` with inline credentials (HTTP on
+      // Win/Linux Chromium 146+, and SOCKS5), deliberately bypassing Playwright's
+      // CDP auth interceptor — which hangs on some proxies (engine #182). Adding a
+      // structured proxy here re-enables that interceptor on top of --proxy-server
+      // and makes every request load forever.
     },
     geoip: locked ? false : proxy ? p.geoip : false,
     timezone: timezone ?? undefined,

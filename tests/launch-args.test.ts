@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { toProxyUrl, toPlaywrightHttpProxy, buildLaunchArgs, deriveHardwareProfile } from '../src/main/launch-args';
+import { toProxyUrl, buildLaunchArgs, deriveHardwareProfile } from '../src/main/launch-args';
 import type { Profile, Fingerprint, ResolvedIdentity } from '../src/main/types';
 
 function profile(over: Partial<Profile> = {}): Profile {
@@ -52,20 +52,6 @@ describe('toProxyUrl', () => {
     expect(toProxyUrl({ type: 'socks5', host: 'h', port: 1080, username: 'u@x', password: 'p:y' }))
       .toBe('socks5://u%40x:p%3Ay@h:1080');
   });
-
-  it('keeps HTTP credentials separate for Playwright auth challenges', () => {
-    expect(toPlaywrightHttpProxy({
-      type: 'http', host: 'proxy.test', port: 8080, username: 'user', password: 'pass',
-    })).toEqual({
-      server: 'http://proxy.test:8080', username: 'user', password: 'pass',
-    });
-  });
-
-  it('does not route SOCKS5 credentials through unsupported Playwright auth', () => {
-    expect(toPlaywrightHttpProxy({
-      type: 'socks5', host: 'proxy.test', port: 1080, username: 'user', password: 'pass',
-    })).toBeUndefined();
-  });
 });
 
 describe('buildLaunchArgs', () => {
@@ -96,16 +82,16 @@ describe('buildLaunchArgs', () => {
     expect(o.geoip).toBe(true);
     expect(o.args).not.toContain('--fingerprint-webrtc-ip=auto');
   });
-  it('authenticated HTTP proxy keeps its URL for GeoIP and adds a Playwright auth override', () => {
+  it('authenticated HTTP proxy passes only the credential URL; no Playwright proxy override', () => {
     const o = buildLaunchArgs(profile({
       proxy: { type: 'http', host: 'proxy.test', port: 8080, username: 'user', password: 'pass' },
       geoip: true,
     }));
+    // URL (with creds) stays for CloakBrowser's resolveProxyConfig + GeoIP.
     expect(o.proxy).toBe('http://user:pass@proxy.test:8080');
-    expect(o.launchOptions).toEqual({
-      chromiumSandbox: true,
-      proxy: { server: 'http://proxy.test:8080', username: 'user', password: 'pass' },
-    });
+    // No launchOptions.proxy: forcing Playwright's CDP auth interceptor on top of
+    // CloakBrowser's --proxy-server inline-cred routing hangs requests (engine #182).
+    expect(o.launchOptions).toEqual({ chromiumSandbox: true });
     expect(o.geoip).toBe(true);
   });
   it('proxy + geoip off => add manual webrtc flag', () => {
