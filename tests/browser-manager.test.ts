@@ -103,6 +103,35 @@ describe('BrowserManager', () => {
     expect(mgr.isRunning('p1')).toBe(true);
   });
 
+  it('seeds geo-block + DNT preferences with the profile settings before launching', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cloak-'));
+    const store = new ProfileStore(dir, { idGen: () => 'p1', seedGen: () => 9 });
+    await store.init();
+    await store.create({ name: 'A', blockGeolocation: true, doNotTrack: true });
+    const ctx = fakeContext();
+    const order: string[] = [];
+    const launcher = vi.fn(async () => { order.push('launch'); return ctx; });
+    const prefsPreparer = vi.fn(() => { order.push('prefs'); });
+    const mgr = new BrowserManager(
+      store,
+      launcher,
+      vi.fn(async () => fakeFp),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      prefsPreparer,
+    );
+
+    await mgr.launch('p1');
+
+    expect(prefsPreparer).toHaveBeenCalledWith(
+      store.get('p1')!.userDataDir,
+      { blockGeolocation: true, doNotTrack: true },
+    );
+    expect(order).toEqual(['prefs', 'launch']);
+  });
+
   it('captures fingerprint on first launch and persists', async () => {
     const { mgr, store, capture } = await setup();
     await mgr.launch('p1');

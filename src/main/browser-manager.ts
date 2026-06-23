@@ -9,12 +9,12 @@ import { IdentityService } from './identity-service';
 import { proxyWarnings } from './unlinkability';
 import { IdentityDriftError, type Fingerprint, type FingerprintDiagnostics, type LaunchResult } from './types';
 import { NullProfileWindowService, type ProfileWindowService } from './profile-window-service';
-import { prepareBrowserPreferences } from './browser-preferences';
+import { prepareBrowserPreferences, type BrowserPreferencesOptions } from './browser-preferences';
 
 type Launcher = (opts: LaunchPersistentContextOptions) => Promise<BrowserContext>;
 type Capturer = (page: Page) => Promise<Fingerprint>;
 type DiagnosticsCapturer = (page: Page) => Promise<FingerprintDiagnostics>;
-type PreferencesPreparer = (userDataDir: string) => void | Promise<void>;
+type PreferencesPreparer = (userDataDir: string, opts: BrowserPreferencesOptions) => void | Promise<void>;
 
 /** Fallback landing page when a profile has no custom startUrl. */
 export const DEFAULT_START_URL = 'https://www.google.com';
@@ -47,7 +47,10 @@ export class BrowserManager extends EventEmitter {
     }
 
     try {
-      await this.preferencesPreparer(profile.userDataDir);
+      await this.preferencesPreparer(profile.userDataDir, {
+        blockGeolocation: profile.blockGeolocation,
+        doNotTrack: profile.doNotTrack,
+      });
     } catch (error) {
       // A damaged/locked Preferences file must not make the whole profile
       // unusable; launch with Chromium defaults and surface the diagnostic.
