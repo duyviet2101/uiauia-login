@@ -1,4 +1,4 @@
-import type { Browser } from 'playwright-core';
+import type { Browser, Page } from 'playwright-core';
 import type { LaunchOptions } from 'cloakbrowser';
 import { launch } from 'cloakbrowser';
 import { toProxyUrl } from './launch-args';
@@ -30,13 +30,15 @@ export class ProxyTester {
       const page = await ctx.newPage();
       await page.goto('https://api.ipify.org?format=json', { timeout: 20000 });
       const body = await page.evaluate(() => document.body.innerText);
-      await ctx.close();
       const ip = JSON.parse(body).ip as string;
+      const ipv6 = await this.probeIpv6(page);
+      await ctx.close();
       const meta = await this.lookupIp(ip);
       return {
         ok: true,
         ip,
         exitIp: ip,
+        ipv6,
         latencyMs: Date.now() - start,
         ...meta,
       };
@@ -45,6 +47,21 @@ export class ProxyTester {
     } finally {
       await browser?.close().catch(() => {});
     }
+  }
+
+  /**
+   * Best-effort IPv6 visibility: hit an IPv6-only echo through the same proxied
+   * browser. A returned address means IPv6 is reachable (a leak risk when the
+   * proxy only covers IPv4). Unreachable/timeout = no IPv6 = safe (swallowed).
+   */
+  private async probeIpv6(page: Page): Promise<string | undefined> {
+    try {
+      await page.goto('https://api6.ipify.org?format=json', { timeout: 8000 });
+      const raw = await page.evaluate(() => document.body.innerText);
+      const got = JSON.parse(raw).ip as string;
+      if (got && got.includes(':')) return got;
+    } catch { /* not reachable = no IPv6 leak */ }
+    return undefined;
   }
 
   private async lookupIp(ip: string): Promise<Partial<ProxyTestResult>> {

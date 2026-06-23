@@ -64,4 +64,10 @@ describe('proxyWarnings', () => {
     const w = proxyWarnings([lockedProfile('a', '9.9.9.9'), lockedProfile('b', '9.9.9.9')]);
     expect(w.filter((x) => x.level === 'high').map((x) => x.profileId).sort()).toEqual(['a', 'b']);
   });
+  it('flags an exposed IPv6 as medium risk', () => {
+    const p = profile('a', '1.1.1.1');
+    p.lastProxyCheck = { checkedAt: 'now', ok: true, exitIp: '1.1.1.1', ipv6: '2001:db8::1' };
+    const w = proxyWarnings([p]);
+    expect(w).toContainEqual({ profileId: 'a', level: 'medium', message: expect.stringContaining('IPv6') });
+  });
 });

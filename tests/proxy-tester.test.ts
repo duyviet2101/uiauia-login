@@ -27,6 +27,22 @@ function fakeBrowser(body: string, throwOn?: 'launch' | 'goto') {
   });
 }
 
+/** Page that answers the IPv4 echo for api.ipify.org and the IPv6 echo for
+ *  api6.ipify.org, so the best-effort IPv6 probe can be exercised. */
+function fakeBrowserWithIpv6(v4: string, v6: { body?: string; fail?: boolean }) {
+  let lastUrl = '';
+  const page = {
+    goto: vi.fn(async (url: string) => {
+      lastUrl = url;
+      if (url.includes('api6.ipify.org') && v6.fail) throw new Error('no ipv6 route');
+    }),
+    evaluate: vi.fn(async () => (lastUrl.includes('api6.ipify.org') ? (v6.body ?? '') : v4)),
+  };
+  const ctx = { newPage: vi.fn(async () => page), close: vi.fn(async () => {}) };
+  const browser = { newContext: vi.fn(async () => ctx), close: vi.fn(async () => {}) };
+  return vi.fn(async () => browser);
+}
+
 describe('ProxyTester', () => {
   it('returns ok with ip parsed from response', async () => {
     const tester = new ProxyTester(fakeBrowser('{"ip":"9.9.9.9"}') as any, fakeFetch);
@@ -51,5 +67,27 @@ describe('ProxyTester', () => {
     const r = await tester.test(proxy);
     expect(r.ok).toBe(false);
     expect(r.error).toContain('timeout');
+  });
+
+  it('reports ipv6 when an IPv6 echo is reachable through the proxy', async () => {
+    const tester = new ProxyTester(
+      fakeBrowserWithIpv6('{"ip":"9.9.9.9"}', { body: '{"ip":"2001:db8::1"}' }) as any,
+      fakeFetch,
+    );
+    const r = await tester.test(proxy);
+    expect(r.ok).toBe(true);
+    expect(r.exitIp).toBe('9.9.9.9');
+    expect(r.ipv6).toBe('2001:db8::1');
+  });
+
+  it('leaves ipv6 undefined when the IPv6 echo is not reachable', async () => {
+    const tester = new ProxyTester(
+      fakeBrowserWithIpv6('{"ip":"9.9.9.9"}', { fail: true }) as any,
+      fakeFetch,
+    );
+    const r = await tester.test(proxy);
+    expect(r.ok).toBe(true);
+    expect(r.exitIp).toBe('9.9.9.9');
+    expect(r.ipv6).toBeUndefined();
   });
 });

@@ -41,6 +41,7 @@ export function toProxySnapshot(result: ProxyTestResult): ProxyCheckSnapshot {
     checkedAt: new Date().toISOString(),
     ok: result.ok,
     exitIp: result.exitIp ?? result.ip,
+    ipv6: result.ipv6,
     country: result.country,
     city: result.city,
     timezone: result.timezone,

@@ -25,6 +25,9 @@ export function proxyWarnings(profiles: Profile[]): ProxyWarning[] {
     if (p.identityLocked && lockedIp && lastIp && lockedIp !== lastIp) {
       out.push({ profileId: p.id, level: 'high', message: `IP proxy đã đổi (${lastIp}) so với identity đã khoá (${lockedIp}).` });
     }
+    if (p.lastProxyCheck?.ipv6) {
+      out.push({ profileId: p.id, level: 'medium', message: `IPv6 đang lộ ra ngoài (${p.lastProxyCheck.ipv6}) — kiểm tra proxy có cover IPv6 không.` });
+    }
   }
   const exitIpGroups = new Map<string, string[]>();
   const asnGeoGroups = new Map<string, string[]>();

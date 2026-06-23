@@ -58,6 +58,9 @@ export interface ProxyCheckSnapshot {
   checkedAt: string;
   ok: boolean;
   exitIp?: string;
+  /** Best-effort: an IPv6 reachable through the browser (possible leak if the
+   *  proxy only covers IPv4). Undefined = no IPv6 seen = safe. */
+  ipv6?: string;
   country?: string;
   city?: string;
   timezone?: string;
@@ -132,6 +135,8 @@ export interface ProxyTestResult {
   ok: boolean;
   ip?: string;
   exitIp?: string;
+  /** Best-effort IPv6 echoed back through the proxied browser (possible leak). */
+  ipv6?: string;
   country?: string;
   city?: string;
   timezone?: string;
