@@ -30,16 +30,29 @@ function objectAt(parent: JsonObject, key: string): JsonObject {
   return object;
 }
 
+export interface BrowserPreferencesOptions {
+  /** true -> block the geolocation permission (denied); false -> reset to ask;
+   *  undefined -> leave whatever is already in Preferences untouched. */
+  blockGeolocation?: boolean;
+  /** true -> send navigator.doNotTrack "1" + DNT header; false -> clear it;
+   *  undefined -> leave untouched. */
+  doNotTrack?: boolean;
+}
+
 /**
- * Configure per-profile browser chrome while Chromium is stopped.
+ * Configure per-profile browser settings while Chromium is stopped.
  *
- * These are browser UI settings only: they do not touch page DOM, fingerprint
- * flags, cookies, or storage. CloakBrowser's built-in provider is deliberately
- * "No Search" (`http://{searchTerms}`), and Chromium protects the default
- * provider preference from external edits. A permission-free settings override
- * extension is therefore the supported way to make Google the omnibox provider.
+ * Covers two kinds of REAL Chromium preferences (no page DOM, fingerprint
+ * flags, cookies, or storage involved):
+ *   1. Browser chrome — restore previous session, and a permission-free
+ *      settings-override extension so Google is the omnibox provider
+ *      (CloakBrowser ships "No Search" and protects the default provider pref).
+ *   2. Privacy — block the geolocation permission and toggle Do Not Track via
+ *      genuine Preferences keys. Verified 2026-06-22: `geolocation: 2` yields a
+ *      "denied" permission and `enable_do_not_track: true` yields DNT "1" —
+ *      undetectable as a JS override. Merges idempotently into any existing file.
  */
-export function prepareBrowserPreferences(userDataDir: string): void {
+export function prepareBrowserPreferences(userDataDir: string, opts: BrowserPreferencesOptions = {}): void {
   const path = join(userDataDir, 'Default', 'Preferences');
   let preferences: JsonObject = {};
   if (existsSync(path)) {
@@ -51,6 +64,17 @@ export function prepareBrowserPreferences(userDataDir: string): void {
   }
 
   objectAt(preferences, 'session').restore_on_startup = 1;
+
+  if (opts.blockGeolocation !== undefined) {
+    const contentSettings = objectAt(objectAt(preferences, 'profile'), 'default_content_setting_values');
+    if (opts.blockGeolocation) contentSettings.geolocation = 2;
+    else delete contentSettings.geolocation;
+  }
+
+  if (opts.doNotTrack !== undefined) {
+    if (opts.doNotTrack) preferences.enable_do_not_track = true;
+    else delete preferences.enable_do_not_track;
+  }
 
   mkdirSync(dirname(path), { recursive: true });
   const temporary = `${path}.manager-${process.pid}.tmp`;
