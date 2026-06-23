@@ -1,6 +1,6 @@
 {
   "name": "uiauia-login",
-  "version": "0.2.9",
+  "version": "0.3.0",
   "description": "Anti-detect Chrome profile manager",
   "main": "out/main/index.js",
   "type": "module",
@@ -17,7 +17,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "cloakbrowser": "^0.3.31",
+    "cloakbrowser": "^0.4.1",
     "electron-updater": "^6.8.9",
     "koffi": "^3.0.2",
     "lowdb": "^7.0.1",

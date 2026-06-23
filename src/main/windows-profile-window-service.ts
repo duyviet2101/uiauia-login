@@ -25,6 +25,7 @@ interface RunningProfile {
   pid: number;
   generation: number;
   activeIcons: LoadedWindowIcons | null;
+  iconFailureSignature: string | null;
   ownedIcons: LoadedWindowIcons[];
   windows: Map<string, WindowState>;
 }
@@ -55,6 +56,7 @@ export class WindowsProfileWindowService implements ProfileWindowService {
         pid,
         generation,
         activeIcons: null,
+        iconFailureSignature: null,
         ownedIcons: [],
         windows: new Map(),
       });
@@ -76,7 +78,10 @@ export class WindowsProfileWindowService implements ProfileWindowService {
       if (wasEnabled) this.restore(running);
       return;
     }
-    if (oldSignature !== this.iconSignature(profile)) running.activeIcons = null;
+    if (oldSignature !== this.iconSignature(profile)) {
+      running.activeIcons = null;
+      running.iconFailureSignature = null;
+    }
     await this.scan();
   }
 
@@ -143,7 +148,6 @@ export class WindowsProfileWindowService implements ProfileWindowService {
       running.profile.windowCustomization.number,
       running.profile.name,
     );
-    const icons = this.iconsFor(running);
     const visibleKeys = new Set<string>();
 
     for (const window of windows) {
@@ -166,11 +170,18 @@ export class WindowsProfileWindowService implements ProfileWindowService {
         if (window.title !== state.lastAppliedTitle) state.lastBrowserTitle = window.title;
         if (this.native.setTitle(window.hwnd, desiredTitle)) state.lastAppliedTitle = desiredTitle;
       }
-      if (this.native.getIcon(window.hwnd, 'small') !== icons.small) {
-        this.native.setIcon(window.hwnd, 'small', icons.small);
-      }
-      if (this.native.getIcon(window.hwnd, 'big') !== icons.big) {
-        this.native.setIcon(window.hwnd, 'big', icons.big);
+    }
+
+    // Title customization must remain useful even if icon rendering/loading fails.
+    const icons = this.iconsFor(running);
+    if (icons) {
+      for (const window of windows) {
+        if (this.native.getIcon(window.hwnd, 'small') !== icons.small) {
+          this.native.setIcon(window.hwnd, 'small', icons.small);
+        }
+        if (this.native.getIcon(window.hwnd, 'big') !== icons.big) {
+          this.native.setIcon(window.hwnd, 'big', icons.big);
+        }
       }
     }
 
@@ -179,18 +190,26 @@ export class WindowsProfileWindowService implements ProfileWindowService {
     }
   }
 
-  private iconsFor(running: RunningProfile): LoadedWindowIcons {
+  private iconsFor(running: RunningProfile): LoadedWindowIcons | null {
     if (running.activeIcons) return running.activeIcons;
     const customization = running.profile.windowCustomization;
-    const path = this.iconCache.get(
-      running.profile.id,
-      customization.number,
-      customization.color,
-    );
-    const icons = this.native.loadIcons(path);
-    running.activeIcons = icons;
-    running.ownedIcons.push(icons);
-    return icons;
+    const signature = this.iconSignature(running.profile);
+    if (running.iconFailureSignature === signature) return null;
+    try {
+      const path = this.iconCache.get(
+        running.profile.id,
+        customization.number,
+        customization.color,
+      );
+      const icons = this.native.loadIcons(path);
+      running.activeIcons = icons;
+      running.ownedIcons.push(icons);
+      return icons;
+    } catch (error) {
+      running.iconFailureSignature = signature;
+      this.log.warn(`[window-customization] Could not create icon for profile ${running.profile.id}:`, error);
+      return null;
+    }
   }
 
   private restore(running: RunningProfile): void {

@@ -8,11 +8,12 @@ import { BrowserManager } from '../src/main/browser-manager';
 import type { Fingerprint, FingerprintDiagnostics } from '../src/main/types';
 import { IdentityService } from '../src/main/identity-service';
 
-function fakeContext() {
+function fakeContext(url = 'about:blank') {
   const page = {
     goto: vi.fn(async () => null),
     evaluate: vi.fn(async () => ({})),
     close: vi.fn(async () => {}),
+    url: vi.fn(() => url),
   };
   const ee = new EventEmitter() as any;
   ee.close = vi.fn(async () => ee.emit('close'));
@@ -114,6 +115,45 @@ describe('BrowserManager', () => {
     await mgr.launch('p1');
     expect(store.get('p1')!.visitorId).toBeNull();
     expect(ctx.page.goto).not.toHaveBeenCalledWith('https://example.com');
+  });
+
+  it('keeps a restored page instead of replacing it with the default start URL', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cloak-'));
+    const store = new ProfileStore(dir, { idGen: () => 'p1', seedGen: () => 9 });
+    await store.init();
+    await store.create({ name: 'A' });
+    await store.update('p1', { fingerprint: fakeFp, lastOpenedAt: '2026-06-22T00:00:00.000Z' });
+    const ctx = fakeContext('https://example.com/account');
+    const mgr = new BrowserManager(store, vi.fn(async () => ctx));
+
+    await mgr.launch('p1');
+    expect(ctx.page.goto).not.toHaveBeenCalled();
+  });
+
+  it('closes Playwright bootstrap about:blank tabs after restoring a real page', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cloak-'));
+    const store = new ProfileStore(dir, { idGen: () => 'p1', seedGen: () => 9 });
+    await store.init();
+    await store.create({ name: 'A' });
+    await store.update('p1', { fingerprint: fakeFp, lastOpenedAt: '2026-06-22T00:00:00.000Z' });
+    const blank = {
+      url: vi.fn(() => 'about:blank'),
+      close: vi.fn(async () => {}),
+    };
+    const restored = {
+      url: vi.fn(() => 'https://example.com/account'),
+      close: vi.fn(async () => {}),
+      goto: vi.fn(async () => null),
+    };
+    const ctx = new EventEmitter() as any;
+    ctx.pages = () => [blank, restored];
+    ctx.newPage = vi.fn(async () => restored);
+    ctx.close = vi.fn(async () => ctx.emit('close'));
+    const mgr = new BrowserManager(store, vi.fn(async () => ctx));
+
+    await mgr.launch('p1');
+    expect(blank.close).toHaveBeenCalledOnce();
+    expect(restored.close).not.toHaveBeenCalled();
   });
 
   it('runDiagnostics captures and persists local diagnostics', async () => {

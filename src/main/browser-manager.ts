@@ -9,10 +9,12 @@ import { IdentityService } from './identity-service';
 import { proxyWarnings } from './unlinkability';
 import { IdentityDriftError, type Fingerprint, type FingerprintDiagnostics, type LaunchResult } from './types';
 import { NullProfileWindowService, type ProfileWindowService } from './profile-window-service';
+import { prepareBrowserPreferences } from './browser-preferences';
 
 type Launcher = (opts: LaunchPersistentContextOptions) => Promise<BrowserContext>;
 type Capturer = (page: Page) => Promise<Fingerprint>;
 type DiagnosticsCapturer = (page: Page) => Promise<FingerprintDiagnostics>;
+type PreferencesPreparer = (userDataDir: string) => void | Promise<void>;
 
 /** Fallback landing page when a profile has no custom startUrl. */
 export const DEFAULT_START_URL = 'https://www.google.com';
@@ -30,6 +32,7 @@ export class BrowserManager extends EventEmitter {
      *  on-screen + fullscreen works). Injected to keep this unit-testable. */
     private displayProvider: () => Display = () => ({ width: 1920, height: 1080 }),
     private profileWindowService: ProfileWindowService = new NullProfileWindowService(),
+    private preferencesPreparer: PreferencesPreparer = prepareBrowserPreferences,
   ) { super(); }
 
   async launch(id: string, opts: { force?: boolean } = {}): Promise<LaunchResult> {
@@ -41,6 +44,14 @@ export class BrowserManager extends EventEmitter {
       // Persist a freshly-fetched proxy check so the next open can reuse it (TTL).
       if (result.snapshot && !result.fromCache) await this.store.setLastProxyCheck(id, result.snapshot);
       if (!result.ok) throw new IdentityDriftError(result.drift);
+    }
+
+    try {
+      await this.preferencesPreparer(profile.userDataDir);
+    } catch (error) {
+      // A damaged/locked Preferences file must not make the whole profile
+      // unusable; launch with Chromium defaults and surface the diagnostic.
+      console.warn(`[browser-preferences] Could not prepare profile ${id}:`, error);
     }
 
     const ctx = await this.launcher(buildLaunchArgs(profile, this.displayProvider()));
@@ -55,7 +66,9 @@ export class BrowserManager extends EventEmitter {
       console.warn(`[window-customization] Attach failed for ${id}:`, error);
     });
 
-    const page = ctx.pages()[0] ?? (await ctx.newPage());
+    const restoredPage = await this.findRestoredPage(ctx, profile.lastOpenedAt !== null);
+    if (restoredPage) await this.closeBootstrapBlankPages(ctx, restoredPage);
+    const page = restoredPage ?? ctx.pages()[0] ?? (await ctx.newPage());
 
     // First time we see this profile, probe local navigator/screen/WebGL only.
     // External FingerprintJS/CDN checks are diagnostic-only so normal launches
@@ -79,7 +92,9 @@ export class BrowserManager extends EventEmitter {
     }
 
     await this.store.update(id, { lastOpenedAt: new Date().toISOString() });
-    await page.goto(profile.startUrl || DEFAULT_START_URL).catch(() => {});
+    // Never overwrite a restored tab. A start URL/default Google page is only
+    // for a first launch or when Chromium genuinely has no previous page.
+    if (!restoredPage) await page.goto(profile.startUrl || DEFAULT_START_URL).catch(() => {});
 
     this.emit('status-changed', id, true);
     return { launched: true, lockedNow, warnings: proxyWarnings(this.store.list()) };
@@ -149,4 +164,26 @@ export class BrowserManager extends EventEmitter {
 
   isRunning(id: string): boolean { return this.running.has(id); }
   runningIds(): string[] { return [...this.running.keys()]; }
+
+  private async findRestoredPage(context: BrowserContext, returning: boolean): Promise<Page | null> {
+    const meaningful = () => context.pages().find((page) => {
+      const url = page.url();
+      return !!url && url !== 'about:blank';
+    }) ?? null;
+    let page = meaningful();
+    if (page || !returning) return page;
+
+    // Session restore can begin just after launchPersistentContext resolves.
+    // Give Chromium a short window before deciding there was nothing to restore.
+    for (let attempt = 0; attempt < 20 && !page; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      page = meaningful();
+    }
+    return page;
+  }
+
+  private async closeBootstrapBlankPages(context: BrowserContext, restoredPage: Page): Promise<void> {
+    const blanks = context.pages().filter((page) => page !== restoredPage && page.url() === 'about:blank');
+    await Promise.all(blanks.map((page) => page.close().catch(() => {})));
+  }
 }

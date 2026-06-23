@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { toProxyUrl, buildLaunchArgs, deriveHardwareProfile } from '../src/main/launch-args';
+import { toProxyUrl, toPlaywrightHttpProxy, buildLaunchArgs, deriveHardwareProfile } from '../src/main/launch-args';
 import type { Profile, Fingerprint, ResolvedIdentity } from '../src/main/types';
 
 function profile(over: Partial<Profile> = {}): Profile {
@@ -51,6 +51,20 @@ describe('toProxyUrl', () => {
     expect(toProxyUrl({ type: 'socks5', host: 'h', port: 1080, username: 'u@x', password: 'p:y' }))
       .toBe('socks5://u%40x:p%3Ay@h:1080');
   });
+
+  it('keeps HTTP credentials separate for Playwright auth challenges', () => {
+    expect(toPlaywrightHttpProxy({
+      type: 'http', host: 'proxy.test', port: 8080, username: 'user', password: 'pass',
+    })).toEqual({
+      server: 'http://proxy.test:8080', username: 'user', password: 'pass',
+    });
+  });
+
+  it('does not route SOCKS5 credentials through unsupported Playwright auth', () => {
+    expect(toPlaywrightHttpProxy({
+      type: 'socks5', host: 'proxy.test', port: 1080, username: 'user', password: 'pass',
+    })).toBeUndefined();
+  });
 });
 
 describe('buildLaunchArgs', () => {
@@ -59,12 +73,15 @@ describe('buildLaunchArgs', () => {
     expect(o.headless).toBe(false);
     expect(o.userDataDir).toBe('/data/p1');
     expect(o.args).toContain('--fingerprint=12345');
+    expect(o.args).toContain('--restore-last-session');
+    expect(o.extensionPaths?.[0]).toContain('manager-google-search');
     expect(o.args?.some((arg) => arg.includes('window-title') || arg.includes('profile-icon'))).toBe(false);
   });
   it('forces windows platform and drops default stealth args (no --no-sandbox)', () => {
     const o = buildLaunchArgs(profile());
     expect(o.args).toContain('--fingerprint-platform=windows');
     expect(o.stealthArgs).toBe(false);
+    expect(o.launchOptions).toMatchObject({ chromiumSandbox: true });
     expect(o.args).not.toContain('--no-sandbox');
   });
   it('no proxy => no geoip, no webrtc flag', () => {
@@ -77,6 +94,18 @@ describe('buildLaunchArgs', () => {
     const o = buildLaunchArgs(profile({ proxy: { type: 'http', host: 'h', port: 80 }, geoip: true }));
     expect(o.geoip).toBe(true);
     expect(o.args).not.toContain('--fingerprint-webrtc-ip=auto');
+  });
+  it('authenticated HTTP proxy keeps its URL for GeoIP and adds a Playwright auth override', () => {
+    const o = buildLaunchArgs(profile({
+      proxy: { type: 'http', host: 'proxy.test', port: 8080, username: 'user', password: 'pass' },
+      geoip: true,
+    }));
+    expect(o.proxy).toBe('http://user:pass@proxy.test:8080');
+    expect(o.launchOptions).toEqual({
+      chromiumSandbox: true,
+      proxy: { server: 'http://proxy.test:8080', username: 'user', password: 'pass' },
+    });
+    expect(o.geoip).toBe(true);
   });
   it('proxy + geoip off => add manual webrtc flag', () => {
     const o = buildLaunchArgs(profile({ proxy: { type: 'http', host: 'h', port: 80 }, geoip: false }));

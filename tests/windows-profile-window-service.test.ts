@@ -104,4 +104,19 @@ describe('WindowsProfileWindowService', () => {
     service.detach('p1');
     expect(native.destroyed).toEqual([1000n, 1001n, 1002n, 1003n]);
   });
+
+  it('still applies the native title when icon generation fails', async () => {
+    const native = new FakeNative();
+    const warn = vi.fn();
+    const cache = { get: vi.fn(() => { throw new Error('icon renderer unavailable'); }) };
+    const service = new WindowsProfileWindowService(native, cache as any, { warn });
+
+    await service.attach(profile(), context().ctx);
+    expect(native.windows[0].title).toBe('[#12] Account');
+    expect(warn).toHaveBeenCalledOnce();
+
+    await service.refresh(profile());
+    expect(warn).toHaveBeenCalledOnce();
+    service.detach('p1');
+  });
 });
