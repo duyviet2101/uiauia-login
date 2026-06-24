@@ -255,4 +255,28 @@ describe('ProfileStore', () => {
     expect(p.blockGeolocation).toBe(true);
     expect(p.doNotTrack).toBe(false);
   });
+
+  it('backfills nonStandardFonts on diagnostics saved before v0.4.0', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cloak-diag-'));
+    writeFileSync(join(dir, 'cloak.json'), JSON.stringify({
+      version: 6,
+      profiles: [{
+        id: 'legacy', name: 'legacy', seed: 1, platform: 'windows', proxy: null, geoip: true,
+        timezone: null, locale: null, startUrl: null, userDataDir: join(dir, 'profiles', 'legacy'),
+        fingerprint: null, visitorId: null, identityLocked: false, resolvedIdentity: null, lastProxyCheck: null,
+        blockGeolocation: true, doNotTrack: false,
+        // diagnostics shape before nonStandardFonts existed
+        diagnostics: {
+          capturedAt: 'now', canvasHash: 'c', canvasWinding: true, audioHash: 'a', fontHash: 'f',
+          fonts: [{ family: 'Arial', available: true }], fontsAvailable: 1, fontsTotal: 1, warnings: [],
+        },
+        windowCustomization: { enabled: true, number: 1, color: '#2563EB' },
+        createdAt: '2026-01-01', lastOpenedAt: null,
+      }],
+    }));
+
+    const store = new ProfileStore(dir);
+    await store.init();
+    expect(store.get('legacy')!.diagnostics!.nonStandardFonts).toEqual([]);
+  });
 });

@@ -54,17 +54,18 @@ export function FingerprintPanel({ fingerprint, visitorId, diagnostics, platform
             <div className="text-slate-400">Available fonts: <span className="font-mono text-slate-200">{diagnostics.fontsAvailable}/{diagnostics.fontsTotal}</span></div>
           </div>
           <p className="mt-2 break-words text-[11px] text-slate-500">
-            {diagnostics.fonts.filter((f) => f.available).map((f) => f.family).join(', ') || 'No candidate fonts detected'}
+            {(diagnostics.fonts ?? []).filter((f) => f.available).map((f) => f.family).join(', ') || 'No candidate fonts detected'}
           </p>
-          {diagnostics.nonStandardFonts.length > 0 && (
+          {/* nonStandardFonts is absent on diagnostics captured by older builds — guard it. */}
+          {(diagnostics.nonStandardFonts ?? []).length > 0 && (
             <p className="mt-2 rounded border border-red-700/60 bg-red-950/40 px-2 py-1 text-[11px] text-red-300">
-              ⚠ {diagnostics.nonStandardFonts.length} font người dùng cài bị lộ giống nhau ở mọi profile:{' '}
-              <span className="font-mono">{diagnostics.nonStandardFonts.join(', ')}</span>. Gỡ khỏi Windows, hoặc dùng máy sạch font cho tài khoản quan trọng.
+              ⚠ {diagnostics.nonStandardFonts!.length} font người dùng cài bị lộ giống nhau ở mọi profile:{' '}
+              <span className="font-mono">{diagnostics.nonStandardFonts!.join(', ')}</span>. Gỡ khỏi Windows, hoặc dùng máy sạch font cho tài khoản quan trọng.
             </p>
           )}
-          {diagnostics.warnings.filter((w) => !w.includes('leak identically')).length > 0 && (
+          {(diagnostics.warnings ?? []).filter((w) => !w.includes('leak identically')).length > 0 && (
             <p className="mt-2 text-[11px] text-amber-300">
-              {diagnostics.warnings.filter((w) => !w.includes('leak identically')).join(' · ')}
+              {(diagnostics.warnings ?? []).filter((w) => !w.includes('leak identically')).join(' · ')}
             </p>
           )}
         </div>
