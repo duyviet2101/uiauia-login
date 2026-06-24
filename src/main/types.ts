@@ -70,6 +70,14 @@ export interface ProxyCheckSnapshot {
   error?: string;
 }
 
+export interface ProxyPrecheckResult {
+  /** false when the profile has no proxy (nothing tested — caller opens directly). */
+  tested: boolean;
+  ok: boolean;
+  error?: string;
+  snapshot?: ProxyCheckSnapshot;
+}
+
 export interface ResolvedIdentity {
   lockedAt: string;
   cloakBrowserVersion: string;

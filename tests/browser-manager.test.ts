@@ -288,4 +288,49 @@ describe('BrowserManager', () => {
     expect(p.seed).toBe(lockedSeed);
     expect(p.fingerprint).toEqual(lockedFp);
   });
+
+  it('precheckProxy returns tested:false and runs no test for a proxyless profile', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cloak-'));
+    const store = new ProfileStore(dir, { idGen: () => 'p1', seedGen: () => 9 });
+    await store.init();
+    await store.create({ name: 'A' }); // no proxy
+    const test = vi.fn(async () => ({ ok: true, exitIp: '1.1.1.1' }));
+    const identity = new IdentityService({ test } as any, () => '146');
+    const mgr = new BrowserManager(store, vi.fn(async () => fakeContext()), vi.fn(async () => fakeFp), undefined, identity);
+
+    const result = await mgr.precheckProxy('p1');
+    expect(result).toEqual({ tested: false, ok: true });
+    expect(test).not.toHaveBeenCalled();
+  });
+
+  it('precheckProxy tests the proxy, returns ok, and caches the snapshot for TTL reuse', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cloak-'));
+    const store = new ProfileStore(dir, { idGen: () => 'p1', seedGen: () => 9 });
+    await store.init();
+    await store.create({ name: 'A', proxy: { type: 'http', host: 'h', port: 80 } });
+    const test = vi.fn(async () => ({ ok: true, exitIp: '9.9.9.9' }));
+    const identity = new IdentityService({ test } as any, () => '146');
+    const mgr = new BrowserManager(store, vi.fn(async () => fakeContext()), vi.fn(async () => fakeFp), undefined, identity);
+
+    const result = await mgr.precheckProxy('p1');
+    expect(result.tested).toBe(true);
+    expect(result.ok).toBe(true);
+    expect(result.snapshot?.exitIp).toBe('9.9.9.9');
+    expect(test).toHaveBeenCalledOnce();
+    // cached so the locked-launch preflight immediately after reuses it (no 2nd test)
+    expect(store.get('p1')!.lastProxyCheck?.exitIp).toBe('9.9.9.9');
+  });
+
+  it('precheckProxy returns ok:false with the error when the proxy is down', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cloak-'));
+    const store = new ProfileStore(dir, { idGen: () => 'p1', seedGen: () => 9 });
+    await store.init();
+    await store.create({ name: 'A', proxy: { type: 'http', host: 'h', port: 80 } });
+    const test = vi.fn(async () => ({ ok: false, error: 'proxy unreachable' }));
+    const identity = new IdentityService({ test } as any, () => '146');
+    const mgr = new BrowserManager(store, vi.fn(async () => fakeContext()), vi.fn(async () => fakeFp), undefined, identity);
+
+    const result = await mgr.precheckProxy('p1');
+    expect(result).toMatchObject({ tested: true, ok: false, error: 'proxy unreachable' });
+  });
 });
