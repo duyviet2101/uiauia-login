@@ -161,9 +161,19 @@ export interface ProfileRuntime extends Profile {
   running: boolean;
 }
 
+export type ProxyWarningKind =
+  | 'no-proxy'        // profile has no proxy (shares host IP)
+  | 'ip-changed'      // current exit IP differs from the locked identity
+  | 'ipv6-leak'       // an IPv6 leaked past an IPv4-only proxy
+  | 'dup-exit-ip'     // two locked profiles share the SAME exit IP
+  | 'same-asn-geo'    // two locked profiles share ASN/ISP/city (diff IP, weaker link)
+  | 'dup-proxy-host'; // two profiles point at the same proxy host:port
+
 export interface ProxyWarning {
   profileId: string;
   level: 'high' | 'medium';
+  /** Machine-readable cause, so the UI can label it accurately (not by level). */
+  kind: ProxyWarningKind;
   message: string;
 }
 

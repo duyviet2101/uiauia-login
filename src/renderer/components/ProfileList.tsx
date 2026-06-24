@@ -1,8 +1,18 @@
 import { useState } from 'react';
-import type { ProfileRuntime, ProxyWarning } from '../../main/types';
+import type { ProfileRuntime, ProxyWarning, ProxyWarningKind } from '../../main/types';
 import { FingerprintPanel } from './FingerprintPanel';
 import { Spinner } from './Spinner';
 import { profileIconForeground } from '../../main/profile-window-customization';
+
+/** Accurate per-cause badge labels (hover shows the full message). */
+const WARNING_LABELS: Record<ProxyWarningKind, string> = {
+  'no-proxy': '⚠ Không proxy',
+  'ip-changed': '⚠ IP đã đổi',
+  'ipv6-leak': '⚠ IPv6 lộ',
+  'dup-exit-ip': '⚠ Trùng IP',
+  'same-asn-geo': '⚠ Cùng ASN/ISP',
+  'dup-proxy-host': '⚠ Trùng proxy',
+};
 
 interface Props {
   profiles: ProfileRuntime[];
@@ -93,7 +103,7 @@ export function ProfileList({
                   title={w.message}
                   className={`rounded px-1.5 py-0.5 text-xs font-medium ${w.level === 'high' ? 'bg-red-900 text-red-200' : 'bg-amber-900 text-amber-200'}`}
                 >
-                  {w.level === 'high' ? '⚠ Không proxy' : '⚠ Trùng IP'}
+                  {WARNING_LABELS[w.kind] ?? '⚠ Cảnh báo'}
                 </span>
               ))}
             </div>

@@ -18,15 +18,15 @@ export function proxyWarnings(profiles: Profile[]): ProxyWarning[] {
   const out: ProxyWarning[] = [];
   for (const p of profiles) {
     if (!p.proxy) {
-      out.push({ profileId: p.id, level: 'high', message: 'Không có proxy — chia sẻ IP máy chủ, dễ bị liên kết.' });
+      out.push({ profileId: p.id, level: 'high', kind: 'no-proxy', message: 'Không có proxy — chia sẻ IP máy chủ, dễ bị liên kết.' });
     }
     const lockedIp = p.resolvedIdentity?.exitIp;
     const lastIp = p.lastProxyCheck?.exitIp;
     if (p.identityLocked && lockedIp && lastIp && lockedIp !== lastIp) {
-      out.push({ profileId: p.id, level: 'high', message: `IP proxy đã đổi (${lastIp}) so với identity đã khoá (${lockedIp}).` });
+      out.push({ profileId: p.id, level: 'high', kind: 'ip-changed', message: `IP proxy đã đổi (${lastIp}) so với identity đã khoá (${lockedIp}).` });
     }
     if (p.lastProxyCheck?.ipv6) {
-      out.push({ profileId: p.id, level: 'medium', message: `IPv6 đang lộ ra ngoài (${p.lastProxyCheck.ipv6}) — kiểm tra proxy có cover IPv6 không.` });
+      out.push({ profileId: p.id, level: 'medium', kind: 'ipv6-leak', message: `IPv6 đang lộ ra ngoài (${p.lastProxyCheck.ipv6}) — kiểm tra proxy có cover IPv6 không.` });
     }
   }
   const exitIpGroups = new Map<string, string[]>();
@@ -41,14 +41,14 @@ export function proxyWarnings(profiles: Profile[]): ProxyWarning[] {
     }
   }
   for (const ids of [...exitIpGroups.values()].filter((x) => x.length > 1)) {
-    for (const id of ids) out.push({ profileId: id, level: 'high', message: 'Trùng actual exit IP với profile đã khoá khác.' });
+    for (const id of ids) out.push({ profileId: id, level: 'high', kind: 'dup-exit-ip', message: 'Trùng actual exit IP với profile đã khoá khác.' });
   }
   for (const ids of [...asnGeoGroups.values()].filter((x) => x.length > 1)) {
-    for (const id of ids) out.push({ profileId: id, level: 'medium', message: 'Cùng ASN/ISP và vị trí proxy với profile đã khoá khác.' });
+    for (const id of ids) out.push({ profileId: id, level: 'medium', kind: 'same-asn-geo', message: 'Cùng ASN/ISP và vị trí proxy với profile đã khoá khác (IP khác nhau).' });
   }
   for (const ids of findProxyConflicts(profiles)) {
     for (const id of ids) {
-      out.push({ profileId: id, level: 'medium', message: 'Trùng host proxy với profile khác.' });
+      out.push({ profileId: id, level: 'medium', kind: 'dup-proxy-host', message: 'Trùng host proxy với profile khác.' });
     }
   }
   return out;

@@ -54,20 +54,36 @@ describe('findProxyConflicts', () => {
 describe('proxyWarnings', () => {
   it('flags no-proxy profile as high risk', () => {
     const w = proxyWarnings([profile('a', null)]);
-    expect(w).toContainEqual({ profileId: 'a', level: 'high', message: expect.stringContaining('proxy') });
+    expect(w).toContainEqual({ profileId: 'a', level: 'high', kind: 'no-proxy', message: expect.stringContaining('proxy') });
   });
   it('flags duplicated proxy host as medium', () => {
     const w = proxyWarnings([profile('a', '1.1.1.1'), profile('b', '1.1.1.1')]);
-    expect(w.filter((x) => x.level === 'medium').map((x) => x.profileId).sort()).toEqual(['a', 'b']);
+    const dupHost = w.filter((x) => x.kind === 'dup-proxy-host');
+    expect(dupHost.map((x) => x.profileId).sort()).toEqual(['a', 'b']);
   });
   it('flags duplicated locked exit IP as high risk', () => {
     const w = proxyWarnings([lockedProfile('a', '9.9.9.9'), lockedProfile('b', '9.9.9.9')]);
-    expect(w.filter((x) => x.level === 'high').map((x) => x.profileId).sort()).toEqual(['a', 'b']);
+    expect(w.filter((x) => x.kind === 'dup-exit-ip').map((x) => x.profileId).sort()).toEqual(['a', 'b']);
   });
   it('flags an exposed IPv6 as medium risk', () => {
     const p = profile('a', '1.1.1.1');
     p.lastProxyCheck = { checkedAt: 'now', ok: true, exitIp: '1.1.1.1', ipv6: '2001:db8::1' };
     const w = proxyWarnings([p]);
-    expect(w).toContainEqual({ profileId: 'a', level: 'medium', message: expect.stringContaining('IPv6') });
+    expect(w).toContainEqual({ profileId: 'a', level: 'medium', kind: 'ipv6-leak', message: expect.stringContaining('IPv6') });
+  });
+
+  // Two locked profiles on DIFFERENT exit IPs but the SAME provider (ASN/ISP/city,
+  // different proxy hosts) => same-asn-geo, NOT dup-exit-ip. This is the real
+  // "shows Trùng IP but IPs differ" case: distinct hosts/IPs, shared VIETSERVER ASN.
+  it('flags same ASN/ISP/city with different exit IPs as same-asn-geo (not dup-exit-ip)', () => {
+    const a = lockedProfile('a', '103.190.81.68', 'host-a');
+    const b = lockedProfile('b', '103.170.255.95', 'host-b');
+    const geo = { asn: '63737', country: 'Vietnam', city: 'Hanoi', isp: 'VIETSERVER' };
+    a.lastProxyCheck = { checkedAt: 'now', ok: true, exitIp: '103.190.81.68', ...geo };
+    b.lastProxyCheck = { checkedAt: 'now', ok: true, exitIp: '103.170.255.95', ...geo };
+    const w = proxyWarnings([a, b]);
+    expect(w.some((x) => x.kind === 'dup-exit-ip')).toBe(false);
+    expect(w.some((x) => x.kind === 'dup-proxy-host')).toBe(false);
+    expect(w.filter((x) => x.kind === 'same-asn-geo').map((x) => x.profileId).sort()).toEqual(['a', 'b']);
   });
 });
