@@ -214,3 +214,37 @@ Report the numbers back to the user, then we spec the harden-vs-expand follow-up
   away from the real monitor (window-position patch + VM flag).
 - Keep the engine pinned to what ships; if you bump it, that's an identity-impacting
   change — call it out.
+
+---
+
+## 10. Follow-up (after the verification report): Fonts Harden
+
+The verification (see `docs/windows-antidetect-verification-findings-2026-06-24.md`)
+found **fonts** is the only HIGH gap: all profiles share the identical host font
+list. We confirmed against the CloakBrowser README that the binary is closed and
+`--fingerprint-fonts-dir` is a Linux-additive tool that does NOT vary or hide host
+fonts on Windows, and that fonts are not in the per-seed noise path. The user has
+**no Pro license**, so a newer binary is out of scope.
+
+The approved follow-up is **detect + warn + cleanup**, specced in
+[`docs/superpowers/specs/2026-06-24-windows-fonts-harden-design.md`](superpowers/specs/2026-06-24-windows-fonts-harden-design.md).
+Do this after the verification report is in:
+
+1. **Phase 0 (this box):** confirm `--fingerprint-noise` default + that clientRects
+   varies across seeds with noise on; and **empirically capture the stock Windows
+   10/11 font baseline** → `scripts/verify-windows/windows-font-baseline.json` (the
+   key data artifact — do not hand-guess it).
+2. **Phase 1:** `src/main/host-fonts.ts` pure `findNonStandardFonts(detected,
+   baseline)` (TDD); extend the `fingerprint-probe.ts` font probe to the curated
+   dictionary (baseline ∪ common non-stock families); surface `nonStandardFonts` +
+   a `high` diagnostics warning naming the offenders. Note: `queryLocalFonts` is
+   blocked, so the detector uses the `measureText` width-probe dictionary — it
+   mirrors what a fingerprinter can actually see.
+3. **Phase 2:** remove the dead fonts-dir pipeline (launch-args `fontsDir` emission,
+   `fonts-dir.ts` + its test, `browser-manager` `fontsDirProvider`, `release.yml`
+   `fonts` job, `electron-builder.yml` extraResources, `build/fonts/windows`). Keep
+   `local_fonts: 2`. Update `TECHNICAL.md`.
+
+Success: clean box → no warning; after installing a test font (e.g. Inter) →
+diagnostics flags it by name; fonts-dir pipeline gone; `npm test` + `tsc` +
+`electron-vite build` all clean. Then report back so the Mac side updates memory.
