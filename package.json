@@ -1,6 +1,6 @@
 {
   "name": "uiauia-login",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "description": "Anti-detect Chrome profile manager",
   "main": "out/main/index.js",
   "type": "module",
