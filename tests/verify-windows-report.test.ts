@@ -10,7 +10,6 @@ const META: RunMeta = {
   profileCount: 2,
   screen: '2560x1440',
   withProxies: false,
-  fontsDir: null,
   external: true,
 };
 

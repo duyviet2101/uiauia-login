@@ -89,6 +89,7 @@ describe('ProfileStore', () => {
         fonts: [],
         fontsAvailable: 0,
         fontsTotal: 0,
+        nonStandardFonts: [],
         warnings: [],
       },
     });

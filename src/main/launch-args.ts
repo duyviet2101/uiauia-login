@@ -66,7 +66,7 @@ function hardwareProfileFor(p: Profile, frozen: Fingerprint | null, seed: number
   return deriveHardwareProfile(seed);
 }
 
-export function buildLaunchArgs(p: Profile, display: Display = DEFAULT_DISPLAY, fontsDir?: string | null): LaunchPersistentContextOptions {
+export function buildLaunchArgs(p: Profile, display: Display = DEFAULT_DISPLAY): LaunchPersistentContextOptions {
   const locked = p.identityLocked ? p.resolvedIdentity : null;
   if (p.identityLocked && !locked) throw new Error('Profile identity is locked but resolved identity is missing.');
   const seed = locked?.seed ?? p.seed;
@@ -109,13 +109,11 @@ export function buildLaunchArgs(p: Profile, display: Display = DEFAULT_DISPLAY, 
   if (locked) args.push(`--fingerprint-webrtc-ip=${locked.webrtcIp ?? locked.exitIp}`);
   else if (proxy && !p.geoip) args.push('--fingerprint-webrtc-ip=auto');
 
-  // Sandbox font enumeration to a bundled Windows font set, so host fonts
-  // (including anything the user installed) never leak and every windows-spoof
-  // profile shows the same plausible Windows font list. Windows-spoof only, and
-  // only when a sufficiently complete bundle was supplied (see fonts-dir.ts).
-  if (fontsDir && platform === 'windows') {
-    args.push(`--fingerprint-fonts-dir=${fontsDir}`);
-  }
+  // NOTE: no --fingerprint-fonts-dir. It is a Linux/Docker additive for supplying
+  // fonts a minimal environment lacks; on a Windows host (DirectWrite) it does not
+  // hide or vary host fonts — proven on 0.4.1 (a bundle omitting host fonts left the
+  // width-probe unchanged). queryLocalFonts stays blocked via local_fonts:2, and
+  // host-font leaks are surfaced by diagnostics (host-fonts.ts) instead.
 
   return {
     userDataDir: p.userDataDir,

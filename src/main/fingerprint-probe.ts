@@ -1,5 +1,7 @@
 import type { Page } from 'playwright-core';
 import type { Fingerprint, FingerprintDiagnostics } from './types';
+import { FONT_DICTIONARY, WINDOWS_FONT_BASELINE } from './font-baseline';
+import { findNonStandardFonts } from './host-fonts';
 
 export interface RawProbe {
   userAgent: string;
@@ -42,19 +44,31 @@ export function parseFingerprint(raw: RawProbe): Fingerprint {
   };
 }
 
-export function parseDiagnostics(raw: RawDiagnostics): FingerprintDiagnostics {
-  const fontsAvailable = raw.fonts.filter((f) => f.available).length;
+export function parseDiagnostics(
+  raw: RawDiagnostics,
+  baseline: string[] = WINDOWS_FONT_BASELINE,
+): FingerprintDiagnostics {
+  const available = raw.fonts.filter((f) => f.available);
+  // Dictionary fonts present but outside the stock Windows baseline = user-installed
+  // fonts that leak identically into every profile (a real linkage signal).
+  const nonStandardFonts = findNonStandardFonts(available.map((f) => f.family), baseline);
   const warnings: string[] = [];
   if (!raw.audioHash) warnings.push('Audio probe unavailable');
-  if (fontsAvailable >= 16) warnings.push('Large font surface');
+  if (nonStandardFonts.length > 0) {
+    warnings.push(
+      `${nonStandardFonts.length} user-installed font(s) leak identically into every profile ` +
+        `(${nonStandardFonts.join(', ')}) — remove them from Windows, or use a clean machine for high-value accounts.`,
+    );
+  }
   return {
     canvasHash: raw.canvasHash,
     canvasWinding: raw.canvasWinding,
     audioHash: raw.audioHash,
     fontHash: raw.fontHash,
     fonts: raw.fonts,
-    fontsAvailable,
+    fontsAvailable: available.length,
     fontsTotal: raw.fonts.length,
+    nonStandardFonts,
     warnings,
     capturedAt: new Date().toISOString(),
   };
@@ -89,7 +103,7 @@ function probeInPage(): RawProbe {
   };
 }
 
-function probeDiagnosticsInPage(): Promise<RawDiagnostics> {
+function probeDiagnosticsInPage(families: string[]): Promise<RawDiagnostics> {
   const hashString = (input: string): string => {
     let h = 0x811c9dc5;
     for (let i = 0; i < input.length; i++) {
@@ -138,12 +152,6 @@ function probeDiagnosticsInPage(): Promise<RawDiagnostics> {
   };
 
   const fontSummary = (): { hash: string; fonts: { family: string; available: boolean }[] } => {
-    const families = [
-      'Arial', 'Calibri', 'Cambria', 'Candara', 'Consolas', 'Courier New',
-      'Georgia', 'Helvetica', 'Menlo', 'Monaco', 'Noto Sans', 'Roboto',
-      'Segoe UI', 'SF Pro Text', 'Tahoma', 'Times New Roman', 'Trebuchet MS',
-      'Verdana', 'DejaVu Sans', 'Liberation Sans',
-    ];
     const baseFonts = ['monospace', 'sans-serif', 'serif'];
     const text = 'mmmmmmmmmmlliWWWWW__0123456789';
     const canvas = document.createElement('canvas');
@@ -218,7 +226,7 @@ export async function captureFingerprint(page: Page): Promise<Fingerprint> {
 }
 
 export async function captureFingerprintDiagnostics(page: Page): Promise<FingerprintDiagnostics> {
-  const raw = (await page.evaluate(probeDiagnosticsInPage)) as RawDiagnostics;
+  const raw = (await page.evaluate(probeDiagnosticsInPage, FONT_DICTIONARY)) as RawDiagnostics;
   return parseDiagnostics(raw);
 }
 

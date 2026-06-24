@@ -11,7 +11,6 @@ export interface RunMeta {
   profileCount: number;
   screen: string;
   withProxies: boolean;
-  fontsDir: string | null;
   external: boolean;
 }
 
@@ -67,7 +66,6 @@ function metaTable(m: RunMeta): string {
     `| Profiles | ${m.profileCount} |`,
     `| Screen (real monitor) | ${m.screen} |`,
     `| Proxies | ${m.withProxies ? 'yes' : 'no'} |`,
-    `| Fonts dir (--fingerprint-fonts-dir) | ${m.fontsDir ?? 'not applied (no ≥50-file bundle)'} |`,
     `| External detectors | ${m.external ? 'opened' : 'skipped'} |`,
   ].join('\n');
 }

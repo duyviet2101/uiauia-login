@@ -7,10 +7,5 @@ release/
 profiles/
 cloak.json
 
-# Windows fonts are bundled at release time from a Windows CI runner, never
-# committed (Microsoft font license). Keep the folder via .gitkeep.
-build/fonts/windows/*
-!build/fonts/windows/.gitkeep
-
 # verify-windows harness run artifacts (per-run reports + observations).
 scripts/verify-windows/reports/

@@ -8,7 +8,6 @@ import { launchPersistentContext, binaryInfo, ensureBinary } from 'cloakbrowser'
 import { ProfileStore } from '../../src/main/store';
 import { buildLaunchArgs, type Display } from '../../src/main/launch-args';
 import { prepareBrowserPreferences } from '../../src/main/browser-preferences';
-import { resolveWindowsFontsDir } from '../../src/main/fonts-dir';
 import { parseProxyString } from '../../src/main/proxy-parse';
 import type { Profile, ProxyConfig } from '../../src/main/types';
 import { captureObservation } from './probe';
@@ -24,7 +23,6 @@ interface Args {
   external: boolean;
   proxiesFile: string | null;
   keep: boolean;
-  fontsDirOverride: string | null;
 }
 
 function parseArgs(argv: string[]): Args {
@@ -35,7 +33,6 @@ function parseArgs(argv: string[]): Args {
     external: false,
     proxiesFile: null,
     keep: false,
-    fontsDirOverride: null,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -56,11 +53,6 @@ function parseArgs(argv: string[]): Args {
       if (!args.proxiesFile) throw new Error('--proxies needs a file path');
     } else if (a === '--keep') {
       args.keep = true;
-    } else if (a === '--fonts-dir') {
-      // Override the bundled-fonts resolution to point --fingerprint-fonts-dir at
-      // an arbitrary bundle (e.g. to test fonts-dir behaviour from a space-free path).
-      args.fontsDirOverride = argv[++i] ?? null;
-      if (!args.fontsDirOverride) throw new Error('--fonts-dir needs a directory path');
     } else {
       throw new Error(`Unknown argument: ${a}`);
     }
@@ -88,7 +80,6 @@ function loadProxies(file: string): ProxyConfig[] {
 async function probeProfile(
   profile: Profile,
   display: Display,
-  fontsDir: string | null,
   external: boolean,
   probeUrl: string,
 ): Promise<ProfileObservation> {
@@ -99,7 +90,7 @@ async function probeProfile(
       blockGeolocation: profile.blockGeolocation,
       doNotTrack: profile.doNotTrack,
     });
-    ctx = await launchPersistentContext(buildLaunchArgs(profile, display, fontsDir));
+    ctx = await launchPersistentContext(buildLaunchArgs(profile, display));
     const page = ctx.pages()[0] ?? (await ctx.newPage());
     await page.bringToFront().catch(() => {});
     // Probe on a loopback secure context so UA-CH + deviceMemory are exposed
@@ -129,15 +120,6 @@ async function main(): Promise<void> {
   const version = binaryInfo().version;
   console.log(`CloakBrowser binary: ${version}`);
 
-  const fontsDir = args.fontsDirOverride ?? resolveWindowsFontsDir();
-  if (args.fontsDirOverride) {
-    console.log(`Fonts dir (override): ${fontsDir}`);
-  } else {
-    console.log(fontsDir
-      ? `Fonts dir applied: ${fontsDir}`
-      : 'Fonts dir: none (no ≥50-file Windows bundle present) → --fingerprint-fonts-dir omitted, host fonts at OS default.');
-  }
-
   const proxies = args.proxiesFile ? loadProxies(args.proxiesFile) : [];
   if (args.proxiesFile) console.log(`Loaded ${proxies.length} prox(ies) from ${args.proxiesFile}`);
 
@@ -158,7 +140,7 @@ async function main(): Promise<void> {
       const proxy = proxies[i] ?? null;
       const profile = await store.create({ name: `verify-${i + 1}`, platform: 'windows', proxy });
       console.log(`\n[${i + 1}/${args.profiles}] launching ${profile.name} (seed ${profile.seed})${proxy ? ` via ${proxy.host}:${proxy.port}` : ''}…`);
-      const observation = await probeProfile(profile, args.display, fontsDir, args.external, probeServer.url);
+      const observation = await probeProfile(profile, args.display, args.external, probeServer.url);
       observations.push(observation);
       console.log(observation.ok
         ? `  ok — canvas ${observation.canvasHash} · webgl "${observation.webglRenderer}" · audio ${observation.audioHash ?? 'null'}`
@@ -172,7 +154,6 @@ async function main(): Promise<void> {
       profileCount: args.profiles,
       screen: args.screenLabel,
       withProxies: proxies.length > 0,
-      fontsDir,
       external: args.external,
     };
     const report = buildReport(meta, observations);

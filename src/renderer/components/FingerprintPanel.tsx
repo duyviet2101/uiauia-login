@@ -56,8 +56,16 @@ export function FingerprintPanel({ fingerprint, visitorId, diagnostics, platform
           <p className="mt-2 break-words text-[11px] text-slate-500">
             {diagnostics.fonts.filter((f) => f.available).map((f) => f.family).join(', ') || 'No candidate fonts detected'}
           </p>
-          {diagnostics.warnings.length > 0 && (
-            <p className="mt-2 text-[11px] text-amber-300">{diagnostics.warnings.join(' · ')}</p>
+          {diagnostics.nonStandardFonts.length > 0 && (
+            <p className="mt-2 rounded border border-red-700/60 bg-red-950/40 px-2 py-1 text-[11px] text-red-300">
+              ⚠ {diagnostics.nonStandardFonts.length} font người dùng cài bị lộ giống nhau ở mọi profile:{' '}
+              <span className="font-mono">{diagnostics.nonStandardFonts.join(', ')}</span>. Gỡ khỏi Windows, hoặc dùng máy sạch font cho tài khoản quan trọng.
+            </p>
+          )}
+          {diagnostics.warnings.filter((w) => !w.includes('leak identically')).length > 0 && (
+            <p className="mt-2 text-[11px] text-amber-300">
+              {diagnostics.warnings.filter((w) => !w.includes('leak identically')).join(' · ')}
+            </p>
           )}
         </div>
       ) : (

@@ -105,17 +105,8 @@ describe('buildLaunchArgs', () => {
     expect(o.locale).toBe('ja-JP');
   });
 
-  it('adds --fingerprint-fonts-dir for a windows profile when a fonts dir is supplied', () => {
-    const o = buildLaunchArgs(profile({ platform: 'windows' }), undefined, '/x/fonts');
-    expect(o.args).toContain('--fingerprint-fonts-dir=/x/fonts');
-  });
-  it('omits --fingerprint-fonts-dir for a macos profile even with a fonts dir', () => {
-    const o = buildLaunchArgs(profile({ platform: 'macos' }), undefined, '/x/fonts');
-    expect(o.args?.some((a) => a.startsWith('--fingerprint-fonts-dir'))).toBe(false);
-  });
-  it('omits --fingerprint-fonts-dir when no fonts dir is supplied', () => {
-    const o = buildLaunchArgs(profile({ platform: 'windows' }), undefined, null);
-    expect(o.args?.some((a) => a.startsWith('--fingerprint-fonts-dir'))).toBe(false);
+  it('never emits --fingerprint-fonts-dir (removed: no-op on Windows DirectWrite)', () => {
+    expect(buildLaunchArgs(profile({ platform: 'windows' })).args?.some((a) => a.startsWith('--fingerprint-fonts-dir'))).toBe(false);
   });
 
   // --- Screen MUST match the real display (not the seed). A spoofed screen that
