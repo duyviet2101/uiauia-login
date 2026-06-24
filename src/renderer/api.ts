@@ -10,6 +10,7 @@ import type {
   LaunchResult,
   IdentityPreflightResult,
   FingerprintDiagnostics,
+  ProxyPrecheckResult,
 } from '../main/types';
 
 const bridge = typeof window !== 'undefined' ? window.api : undefined;
@@ -46,6 +47,7 @@ export const api = {
   regenerateSeed: (id: string) => need().regenerateSeed(id),
   resetIdentity: (id: string) => need().resetIdentity(id),
   preflightIdentity: (id: string): Promise<IdentityPreflightResult> => need().preflightIdentity(id),
+  precheckProxy: (id: string): Promise<ProxyPrecheckResult> => need().precheckProxy(id),
   launch: (id: string): Promise<LaunchResult> => need().launch(id),
   forceLaunch: (id: string): Promise<LaunchResult> => need().forceLaunch(id),
   stop: (id: string) => need().stop(id),

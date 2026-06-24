@@ -44,6 +44,7 @@ export function registerIpc(
       throw e;
     }
   });
+  ipcMain.handle('browser:precheck-proxy', (_e, id: string) => manager.precheckProxy(id));
   ipcMain.handle('browser:force-launch', (_e, id: string) => manager.forceLaunch(id));
   ipcMain.handle('browser:stop', (_e, id: string) => manager.stop(id));
   ipcMain.handle('browser:running', () => manager.runningIds());

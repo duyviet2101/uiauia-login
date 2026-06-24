@@ -7,7 +7,7 @@ import { buildLaunchArgs, type Display } from './launch-args';
 import { captureFingerprint, captureFingerprintDiagnostics } from './fingerprint-probe';
 import { IdentityService } from './identity-service';
 import { proxyWarnings } from './unlinkability';
-import { IdentityDriftError, type Fingerprint, type FingerprintDiagnostics, type LaunchResult } from './types';
+import { IdentityDriftError, type Fingerprint, type FingerprintDiagnostics, type LaunchResult, type ProxyPrecheckResult } from './types';
 import { NullProfileWindowService, type ProfileWindowService } from './profile-window-service';
 import { prepareBrowserPreferences, type BrowserPreferencesOptions } from './browser-preferences';
 import { resolveWindowsFontsDir } from './fonts-dir';
@@ -38,6 +38,21 @@ export class BrowserManager extends EventEmitter {
      *  windows-spoof profiles). Resolves to null when no complete bundle ships. */
     private fontsDirProvider: () => string | null = resolveWindowsFontsDir,
   ) { super(); }
+
+  /**
+   * Pre-launch proxy gate for the manual "Open" action. When the profile has a
+   * proxy, test it and cache the result (so a locked launch immediately after
+   * reuses it within the TTL instead of testing twice). A proxyless profile
+   * returns tested:false so the caller opens directly.
+   */
+  async precheckProxy(id: string): Promise<ProxyPrecheckResult> {
+    const profile = this.store.get(id);
+    if (!profile) throw new Error(`Profile not found: ${id}`);
+    if (!profile.proxy) return { tested: false, ok: true };
+    const snapshot = await this.identityService.checkProxy(profile.proxy);
+    await this.store.setLastProxyCheck(id, snapshot);
+    return { tested: true, ok: snapshot.ok, error: snapshot.error, snapshot };
+  }
 
   async launch(id: string, opts: { force?: boolean } = {}): Promise<LaunchResult> {
     if (this.running.has(id)) return { launched: true, lockedNow: false, warnings: proxyWarnings(this.store.list()) };

@@ -31,6 +31,7 @@ const api = {
   regenerateSeed: (id: string) => ipcRenderer.invoke('profiles:regenerate-seed', id),
   resetIdentity: (id: string) => ipcRenderer.invoke('profiles:reset-identity', id),
   preflightIdentity: (id: string) => ipcRenderer.invoke('profiles:preflight-identity', id),
+  precheckProxy: (id: string) => ipcRenderer.invoke('browser:precheck-proxy', id),
   launch: (id: string) => ipcRenderer.invoke('browser:launch', id),
   forceLaunch: (id: string) => ipcRenderer.invoke('browser:force-launch', id),
   stop: (id: string) => ipcRenderer.invoke('browser:stop', id),

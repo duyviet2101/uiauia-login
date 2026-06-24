@@ -154,6 +154,17 @@ export default function App() {
   }
 
   const handleLaunch = (id: string) => withBusy(id, async () => {
+    // Pre-launch proxy gate: never open the browser on a dead/wrong proxy.
+    const target = profiles.find((p) => p.id === id);
+    if (target?.proxy) {
+      addToast('info', 'Đang test proxy…');
+      const pre = await api.precheckProxy(id);
+      if (!pre.ok) {
+        addToast('error', `Proxy không hoạt động: ${pre.error ?? 'không xác định'}. Hãy thử lại.`);
+        return;
+      }
+      addToast('success', 'Proxy hoạt động.');
+    }
     try {
       const result = await api.launch(id);
       if (result.lockedNow) addToast('success', 'Identity locked for this profile.');
