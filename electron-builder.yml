@@ -24,13 +24,10 @@ asarUnpack:
   - node_modules/koffi/**/*
   - node_modules/@koromix/koffi-*/**/*
 
-# Bundle a complete Windows font set so windows-spoof profiles sandbox font
-# enumeration to it (hides host fonts, incl. user-installed). Populated only in
-# CI from a Windows runner (see .github/workflows/release.yml) — the repo ships
-# just a .gitkeep, so local/dev builds carry no fonts and fall back to the OS set.
-extraResources:
-  - from: build/fonts/windows
-    to: fonts/windows
+# No bundled fonts: --fingerprint-fonts-dir is a no-op on Windows (DirectWrite),
+# so a font bundle gave no benefit and re-introduced MS-font license risk. Host
+# fonts stay blocked from queryLocalFonts (local_fonts:2) and host-font leaks are
+# surfaced via diagnostics instead.
 
 # macOS
 mac:

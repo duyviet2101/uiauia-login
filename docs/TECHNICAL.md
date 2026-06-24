@@ -59,7 +59,7 @@ Migration: `store.migrate()` (SCHEMA_VERSION) tự bù field mới cho profile t
 
 ## 4. Lõi chống nhận diện (`launch-args.ts`)
 
-`buildLaunchArgs(profile, display?, fontsDir?)` → tham số cho `launchPersistentContext`:
+`buildLaunchArgs(profile, display?)` → tham số cho `launchPersistentContext`:
 
 ```ts
 args: [
@@ -71,7 +71,7 @@ args: [
   `--fingerprint-hardware-concurrency=${cores}`,
   ...(deviceMemory ? [`--fingerprint-device-memory=${deviceMemory}`] : []),
   ...(proxy && !geoip ? ['--fingerprint-webrtc-ip=auto'] : []),
-  ...(fontsDir && platform === 'windows' ? [`--fingerprint-fonts-dir=${fontsDir}`] : []),  // sandbox font (mục 4.2)
+  // KHÔNG có --fingerprint-fonts-dir: no-op trên Windows DirectWrite (mục 4.2/9.3)
 ]
 stealthArgs: false,   // bỏ default của cloakbrowser (gồm --no-sandbox, không cần trên desktop)
 proxy, geoip, timezone, locale, headless: false
@@ -92,7 +92,7 @@ Binary mặc định để `screen` (1920×1080 Win / 1440×900 Mac), `hardwareC
 Hai cơ chế chạy **trước launch**, ghi vào Chrome thật (không phải JS hack):
 
 - **Geo-block + DNT (`browser-preferences.ts`):** seed `Default/Preferences` idempotent trước mỗi lần mở (gộp chung với việc set search provider / restore session, một lần ghi atomic). `blockGeolocation` → `profile.default_content_setting_values.geolocation = 2` (mọi yêu cầu vị trí bị **denied** — triệt tiêu rò vị trí thật qua WiFi-AP khi user lỡ bấm Allow); `doNotTrack` → `enable_do_not_track`. Đã kiểm chứng 2026-06-22: pref thật, undetectable. Mặc định geo-block **ON**, DNT **OFF** (off giống số đông hơn). Hai field này **không** identity-impacting → sửa được cả khi profile đã khoá.
-- **Font sandbox (`--fingerprint-fonts-dir`, `fonts-dir.ts`):** chỉ với profile **windows-spoof** và khi app có bundle font Windows đủ (≥50 file). Sandbox enumeration về đúng bộ bundle → **giấu hết font host** kể cả font user cài thêm (Probe C: 20 font host → 1). Bundle nạp từ CI (runner Windows copy `C:\Windows\Fonts`), **không commit vào repo** (license MS); thiếu/partial bundle → tự bỏ qua, dùng font OS (an toàn hơn bộ thưa giả lộ liễu). "Match city" theo `--fingerprint-location` đã loại: **hỏng trên binary Mac** (Probe A).
+- **Font leak detect + warn (`host-fonts.ts` + diagnostics):** `--fingerprint-fonts-dir` **đã loại** — chứng minh trên 0.4.1 là **no-op trên Windows** (DirectWrite vẫn enumerate font host; bundle bỏ 4 họ font không làm width-probe đổi). Vì binary đóng không cho font biến thiên theo profile, font host (kể cả user cài thêm) lộ **giống hệt** ở mọi profile = vector liên kết. Thay vì sandbox bất khả thi, ta **phát hiện & cảnh báo**: probe (`fingerprint-probe.ts`) đo `measureText` trên một **từ điển** = baseline Windows stock ∪ họ non-stock phổ biến; `findNonStandardFonts(detected, baseline)` trả về font ngoài baseline → diagnostics gắn cảnh báo `high` nêu tên thủ phạm (vd "Ubuntu Mono"). Baseline chụp thực nghiệm từ registry HKLM máy sạch (`src/main/font-baseline.ts`, provenance ở `scripts/verify-windows/windows-font-baseline.json`). Font tên tùy biện không có trong từ điển (vd "Tirra") thì cả adversary lẫn ta đều không thấy — đúng giới hạn của width-probe khi `queryLocalFonts` đã bị chặn.
 - **Chặn Local Font Access (`local_fonts: 2`, luôn bật):** `queryLocalFonts()` liệt kê được TOÀN BỘ font host (kể cả font user cài thêm) và `--fingerprint-fonts-dir` **không** phủ API này (đã kiểm 2026-06-23: manager trả y hệt Chrome thật — 204 font + font custom). Seed `default_content_setting_values.local_fonts = 2` → quyền bị từ chối, không popup. API luôn cần user-gesture/popup nên rủi ro thấp, chặn cho chắc.
 
 ## 5. Đo & theo dõi fingerprint
@@ -140,8 +140,8 @@ Hệ quả & sắc thái:
 **Trước đây:** `hardwareConcurrency`, `deviceMemory`, độ phân giải màn hình kẹt cứng (8 / 8 / 1920×1080) ở mọi seed → dùng chung giữa các profile. (Tài liệu cũ ghi sai là "không có flag trong 0.3.31" — flag `--fingerprint-screen-width/height`, `-hardware-concurrency`, `-device-memory` **có sẵn** trong 0.3.31.)
 **Hiện tại:** `deriveHardwareProfile` (mục 4.1) truyền explicit các flag này theo seed → **biến thiên giữa các profile** trên cả Win lẫn Mac. Caveat: `navigator.deviceMemory` đọc ra `null` trên `about:blank` (cần verify trên trang HTTPS thật); flag vẫn được truyền.
 
-### 9.3 Font enumeration — ĐÃ sandbox (tùy chọn, windows-spoof)
-`--fingerprint-fonts-dir` đã được wire (`fonts-dir.ts` + mục 4.2): profile windows-spoof sandbox font enumeration về bộ bundle → giấu font host (kể cả font user cài thêm). **Điều kiện:** app phải kèm bundle font Windows đủ (≥50 file), nạp từ CI runner Windows (`release.yml` job `fonts`; **không commit vào repo** — license MS). Build dev/local không có bundle → fallback font OS thật (residual: font host vẫn lộ & giống nhau giữa các profile cùng máy — dùng diagnostics để theo dõi). Profile macOS-spoof: không áp. Bộ bundle thiếu còn hại hơn không bundle (vân tay thưa) → resolver yêu cầu ≥50 file mới bật.
+### 9.3 Font enumeration — detect + warn (không sandbox được)
+Đã xác minh (2026-06-25, binary 146/58): font **không** biến thiên theo profile và **không thể** sandbox phía consumer. `--fingerprint-noise` (per-seed) chỉ phủ canvas/WebGL/audio/clientRects — **không phủ font**; `--fingerprint-fonts-dir` là công cụ additive cho Linux/Docker, **no-op trên Windows DirectWrite** (đã thử: bundle bỏ 4 họ font → width-probe không đổi). Binary đóng (không có Pro license) nên không sửa được tận gốc. → Pipeline fonts-dir **đã gỡ bỏ** (launch-args, `fonts-dir.ts`, `release.yml` job `fonts`, `electron-builder` extraResources, `build/fonts`). Giữ `local_fonts: 2` (chặn `queryLocalFonts`). Thay bằng **detect + warn** (mục 4.2): diagnostics nêu tên font user cài bị lộ giống nhau ở mọi profile; khuyến nghị vận hành là dùng máy **sạch font** cho tài khoản quan trọng. clientRects: đo lại 5 profile → 5/5 khác nhau (noise on mặc định), không phải lỗ hổng.
 
 ### 9.4 Ký số
 Chưa code-sign (Windows) / notarize (macOS) → SmartScreen / Gatekeeper cảnh báo. Cần Apple Developer (~$99/năm) + cert Windows để hết.

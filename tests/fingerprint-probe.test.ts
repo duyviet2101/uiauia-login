@@ -41,8 +41,10 @@ const rawDiagnostics: RawDiagnostics = {
 };
 
 describe('parseDiagnostics', () => {
+  const baseline = ['Arial', 'Menlo', 'Segoe UI'];
+
   it('counts available fonts and stamps capturedAt', () => {
-    const diagnostics = parseDiagnostics(rawDiagnostics);
+    const diagnostics = parseDiagnostics(rawDiagnostics, baseline);
     expect(diagnostics.fontsAvailable).toBe(1);
     expect(diagnostics.fontsTotal).toBe(2);
     expect(diagnostics.canvasHash).toBe('c123');
@@ -51,7 +53,27 @@ describe('parseDiagnostics', () => {
   });
 
   it('warns when audio probe is unavailable', () => {
-    const diagnostics = parseDiagnostics({ ...rawDiagnostics, audioHash: null });
+    const diagnostics = parseDiagnostics({ ...rawDiagnostics, audioHash: null }, baseline);
     expect(diagnostics.warnings).toContain('Audio probe unavailable');
+  });
+
+  it('reports no non-standard fonts when every available font is stock', () => {
+    const diagnostics = parseDiagnostics(rawDiagnostics, baseline); // only Arial available, in baseline
+    expect(diagnostics.nonStandardFonts).toEqual([]);
+    expect(diagnostics.warnings.some((w) => w.includes('leak identically'))).toBe(false);
+  });
+
+  it('flags a detected non-stock font by name with a high-severity warning', () => {
+    const raw: RawDiagnostics = {
+      ...rawDiagnostics,
+      fonts: [
+        { family: 'Arial', available: true },
+        { family: 'Ubuntu Mono', available: true },
+        { family: 'Inter', available: false },
+      ],
+    };
+    const diagnostics = parseDiagnostics(raw, baseline);
+    expect(diagnostics.nonStandardFonts).toEqual(['Ubuntu Mono']);
+    expect(diagnostics.warnings.some((w) => w.includes('Ubuntu Mono') && w.includes('leak identically'))).toBe(true);
   });
 });

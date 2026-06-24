@@ -15,33 +15,7 @@ permissions:
   contents: write
 
 jobs:
-  fonts:
-    # Collect a complete Windows font set once, on a Windows runner, so every
-    # installer (including the macOS dmg) can sandbox font enumeration to it and
-    # hide host fonts on windows-spoof profiles. These fonts are NEVER committed
-    # to the repo (Microsoft font license) — they live only in this CI artifact.
-    runs-on: windows-latest
-    steps:
-      - name: Copy Windows system fonts
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path build/fonts/windows | Out-Null
-          Get-ChildItem -Path "$env:WINDIR\Fonts\*" -Include *.ttf,*.ttc,*.otf -File |
-            Copy-Item -Destination build/fonts/windows -Force
-          $count = (Get-ChildItem build/fonts/windows -File | Measure-Object).Count
-          Write-Host "Collected $count Windows font files"
-          if ($count -lt 50) { throw "Expected a complete Windows font set, got only $count files" }
-      - uses: actions/upload-artifact@v4
-        with:
-          name: windows-fonts
-          path: build/fonts/windows
-          if-no-files-found: error
-          # Internal inter-job plumbing only — keep the MS fonts out of long-lived
-          # CI storage. They ship bundled INSIDE the installers, never as loose files.
-          retention-days: 1
-
   build:
-    needs: fonts
     strategy:
       fail-fast: false
       matrix:
@@ -62,14 +36,6 @@ jobs:
       - run: npm ci
 
       - run: npm run build
-
-      # Pull in the Windows font set so electron-builder's extraResources bundles
-      # it into both the .exe and the .dmg (Mac hosts running windows-spoof too).
-      - name: Fetch bundled Windows fonts
-        uses: actions/download-artifact@v4
-        with:
-          name: windows-fonts
-          path: build/fonts/windows
 
       - name: Build installer (no publish)
         run: npx electron-builder ${{ matrix.args }} --publish never
@@ -94,8 +60,6 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          # Only the installer artifacts — NOT the windows-fonts plumbing artifact,
-          # so raw MS font files never get attached to the public release.
           pattern: installers-*
           path: artifacts
           merge-multiple: true

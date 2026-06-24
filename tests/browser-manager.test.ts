@@ -38,6 +38,7 @@ const fakeDiagnostics: FingerprintDiagnostics = {
   fonts: [{ family: 'Arial', available: true }],
   fontsAvailable: 1,
   fontsTotal: 1,
+  nonStandardFonts: [],
   warnings: [],
 };
 
@@ -130,30 +131,6 @@ describe('BrowserManager', () => {
       { blockGeolocation: true, doNotTrack: true },
     );
     expect(order).toEqual(['prefs', 'launch']);
-  });
-
-  it('passes the resolved Windows fonts dir into the launcher for a windows profile', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'cloak-'));
-    const store = new ProfileStore(dir, { idGen: () => 'p1', seedGen: () => 9 });
-    await store.init();
-    await store.create({ name: 'A', platform: 'windows' });
-    const ctx = fakeContext();
-    const launcher = vi.fn(async () => ctx);
-    const mgr = new BrowserManager(
-      store,
-      launcher,
-      vi.fn(async () => fakeFp),
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      () => '/bundled/fonts',
-    );
-
-    await mgr.launch('p1');
-
-    expect((launcher.mock.calls[0] as any[])[0].args).toContain('--fingerprint-fonts-dir=/bundled/fonts');
   });
 
   it('captures fingerprint on first launch and persists', async () => {

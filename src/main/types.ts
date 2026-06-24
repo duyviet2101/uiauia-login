@@ -35,6 +35,9 @@ export interface FingerprintDiagnostics {
   fonts: FontProbe[];
   fontsAvailable: number;
   fontsTotal: number;
+  /** Detected dictionary fonts outside the stock Windows baseline — user-installed
+   *  fonts that leak identically into every profile (a cross-profile linkage). */
+  nonStandardFonts: string[];
   warnings: string[];
 }
 
