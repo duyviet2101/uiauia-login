@@ -11,7 +11,8 @@
     "dist:mac": "electron-vite build && electron-builder --mac",
     "dist:win": "electron-vite build && electron-builder --win",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "verify:windows": "tsx scripts/verify-windows/cli.ts"
   },
   "keywords": [],
   "author": "",
@@ -38,6 +39,7 @@
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "tailwindcss": "^4.3.1",
+    "tsx": "^4.22.4",
     "typescript": "^6.0.3",
     "vite": "^7.3.5",
     "vitest": "^4.1.9"
