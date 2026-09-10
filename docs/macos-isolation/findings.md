@@ -430,6 +430,80 @@ ghi con số của package — bản ghi thành hư cấu mà không ai nhận r
 
 ---
 
+## 9f. Ba lỗi do review độc lập tìm ra — đã sửa
+
+Một agent khác review đợt triển khai và tìm ra ba lỗi. Cả ba đều đúng; không cái nào là
+hiểu nhầm. Ghi lại vì hai lỗi đầu cùng một gốc: **xây được bộ phát hiện rồi không nối
+vào quyết định.**
+
+### [P1] `force` bỏ qua luôn cả kiểm tra engine
+
+`forceLaunch()` gọi `launch(..., { force: true })`, và `preflight()` bỏ **toàn bộ**
+`checkLockedIdentity` khi `force` — gồm cả so sánh engine.
+
+Hệ quả cụ thể: profile khoá ở engine 146, máy đã đổi sang bản khác, người dùng bấm
+"Mở & cập nhật IP" → profile **mở bằng bản mới**, trong khi store vẫn ghi 146 và toast
+vẫn nói "Phiên bản engine giữ nguyên". Giữ con số cũ trong dữ liệu **không** giữ được
+binary cũ trên đĩa. Toast đó nói sai về một sự thật liên quan tới nhận diện.
+
+Test cũ cũng cho qua tình huống này vì nó chỉ assert con số lưu trong store.
+
+Sửa: cổng engine chạy ở **bước 0 của preflight, cho mọi lần mở, kể cả `force`**. Muốn
+đổi thì phải chọn "Chấp nhận engine mới" — thao tác đó ghi version **trước** khi
+preflight chạy, nên engine đã chấp nhận sẽ khớp khi tới cổng, còn engine chưa chấp nhận
+thì `IdentityDriftError` và **launcher không được gọi**.
+
+### [P1] Xác minh binary không được nối vào luồng launch
+
+`readEngineInfo()` phát hiện mismatch nhưng chỉ log + hiện banner. Luồng launch, luồng
+lock và `checkLockedIdentity` vẫn dùng `binaryInfo().version` — tức là marker. Với
+`CLOAKBROWSER_BINARY_PATH` trỏ sang build khác, app vẫn mở và vẫn ghi version sai.
+
+Đây đúng là phần kế hoạch chưa xong, không phải chỉ thiếu UI — và nó vi phạm chính quy
+tắc "package version ≠ binary thực chạy" mà kế hoạch đặt ra.
+
+Sửa, bốn phần:
+
+1. `checkLockedIdentity(profile, runningEngine)` so với **bản binary tự khai**, trên
+   phần Chromium 4 số (marker có thêm số hiệu patch mà binary không khai).
+2. Vấn đề dứt khoát (`not-installed`, `version-mismatch`, `pin-unsatisfied`) →
+   `EngineMismatchError`, **chặn trước khi Chromium tồn tại**, nên trước cả restore.
+3. `unreadable` **không** chặn mở — một binary không trả lời `--version` vẫn có thể là
+   bản đúng — nhưng **chặn khoá identity mới**: không thể lấy một engine không gọi được
+   tên làm baseline.
+4. Profile đã khoá được **pin** (`browserVersion` = marker vừa xác minh), nên launcher
+   không tự giải ra build khác. Đo: pin bằng marker đang cài launch bình thường
+   (Chrome/145.0.0.0, cùng binary với lúc không pin); pin vào bản không tồn tại thì
+   **404 rõ ràng**, không âm thầm lùi.
+
+Một chi tiết phát hiện khi đo: pin **không** được lấy từ
+`resolvedIdentity.cloakBrowserVersion`. Hai marker có thể trùng version Chromium nhưng
+khác số hiệu patch CloakBrowser; pin vào một patch chưa cài sẽ làm launcher **đi tải**.
+Pin lấy từ marker vừa được xác minh là khớp.
+
+### [P2] Analyzer đọc nhiễu thành liên kết
+
+`sharedBy` lọc `acrossOpenDistinct !== 1` nhưng **bỏ qua** `inSessionDistinct`. Vì
+`perOpen` chỉ giữ giá trị **đầu tiên** của mỗi lần mở, một profile lặp A,B,A trong từng
+phiên trông như `[A, A, A]` — ổn định hoàn hảo qua các lần mở. Hai profile như vậy được
+báo `fullyShared: ["test"]` trong khi chính hàng đó ghi `inSessionStable: false`.
+
+Đây là mâu thuẫn với chính comment của hàm ("only compare profiles whose value is
+stable... otherwise 'shared' is not a well-defined claim"), và là bẫy "hash trùng ≠ chắc
+chắn cùng thiết bị" ở tầng phân tích.
+
+**Không** làm sai kết quả Mac đã đo: trong ba nhóm A/B/C `inSessionStable` đều `true`,
+không profile nào bị nhiễu, nên không hàng nào đi qua đường lỗi. Nhưng analyzer sẽ
+không đáng tin ngay lần đầu gặp nhiễu — tức là đúng lúc cần nó nhất.
+
+Sửa: loại profile nhiễu trong phiên khỏi phép so, ghi lý do vào `excludedFromSharing`
+(và in ra report, để không ai tưởng mọi profile đều được so), và `fullyShared` im lặng
+khi có bất kỳ profile nào bị loại — mẫu số vẫn là `measuredProfiles`, nên nó không bao
+giờ tuyên bố liên kết trên tập con còn lại. 4 test regression; test đầu **đã kiểm là
+fail trên code cũ** với đúng triệu chứng review mô tả.
+
+---
+
 ## 10. Khuyến nghị (chưa triển khai, cần quyết định của người dùng)
 
 1. **Không tuyên bố chống WebRTC leak trên macOS** trong `TECHNICAL.md`/UI cho tới khi

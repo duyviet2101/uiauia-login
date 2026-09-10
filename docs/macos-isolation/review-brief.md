@@ -5,9 +5,43 @@ claimed, what backs each claim, and where the claims stop. The point is to make
 the work **easy to attack**, so read the "How to attack this" section first if
 you are short on time.
 
-Branch `macos-isolation`, 4 commits on top of `9de6c8f`. Nothing pushed.
+Branch `macos-isolation`, 6 commits on top of `9de6c8f`. Nothing pushed.
+
+**Round 2:** an independent review found three defects; all three were valid and are
+fixed. See §0 before anything else.
 
 ---
+
+## 0. Round-2 review outcome
+
+Three defects were reported. **All three were confirmed in code and fixed** — none was
+a misreading. Two shared one root cause: *a detector was built and then not wired into
+the decision it was built for.*
+
+| # | Defect | Verdict | Fix |
+|---|---|---|---|
+| P1 | `forceLaunch` passed `force: true`, and preflight skipped the whole identity check including the engine. "Mở & cập nhật IP" opened the profile on a NEW engine while the record and the toast said the engine was untouched. Keeping the old number in the store does not keep the old binary on disk. | **Valid.** The old test only asserted the stored number, so it permitted this. | Engine gate is now step 0 of preflight and runs for EVERY launch, `force` included. Accepting the engine rewrites the record *before* preflight runs, so an accepted engine arrives already matching. |
+| P1 | `readEngineInfo()` detected mismatches but only logged and drew a banner; launch, locking and drift comparison still used `binaryInfo().version`. A custom binary path stayed invisible. | **Valid**, and it broke the plan's own "package version ≠ binary thực chạy" rule. | Identity comparison now uses what the binary reports; definite problems block launch before Chromium exists; `unreadable` does not block a launch but does block LOCKING a new identity; locked profiles launch pinned to the verified marker. |
+| P2 | `sharedBy` filtered on `acrossOpenDistinct` but ignored `inSessionDistinct`. Since `perOpen` keeps only each open's FIRST value, a profile cycling A,B,A looks perfectly stable, so two noisy profiles were reported as fully shared while `inSessionStable: false` sat in the same row. | **Valid.** It also contradicts the function's own comment. | Noisy profiles are excluded and the reason recorded in `excludedFromSharing`; `fullyShared` stays silent whenever anything was excluded. |
+
+Two things worth stating plainly about P2:
+
+- It does **not** invalidate the macOS results. All three groups measured
+  `inSessionStable: true`, so no row ever took the faulty path. The reviewer said
+  the same, and re-checking confirms it.
+- The regression test was **verified to fail on the old code** with exactly the
+  reported symptom (`sharedBy` with one entry) before the fix was kept.
+
+One thing found while fixing P1#2, which the review did not raise: the engine pin must
+come from the marker just verified, **not** from `resolvedIdentity.cloakBrowserVersion`.
+Two markers can share a Chromium version and differ in CloakBrowser's patch revision,
+and pinning an uninstalled revision makes the launcher attempt a download — measured,
+not reasoned: an unsatisfiable pin produced `HTTP 404` and, correctly, no silent
+fallback.
+
+Still outstanding from the review, and agreed: the reviewer has **not** re-run the
+browser matrix, so "three shared fields, zero drift" has no independent confirmation
+yet. That remains the single biggest unverified claim in this work.
 
 ## 1. What the task was
 
@@ -48,6 +82,7 @@ draft violated one of them and how it was caught.
 | Commit | Contents | tsc | tests |
 |---|---|---|---|
 | `e4f21c9` | verify harness rewrite (Measured<T>, SHA-256, dual canvas paths, per-persona fonts, stability triad, 2 new consistency rules, CLI flags, reanalyze) | clean | 176 pass |
+| *(round 2)* | engine gate in preflight, verified-binary comparison, engine pin, stability sharing fix | clean | 235 pass |
 | `6b8b0be` | five main-process workstreams (see below) | clean | 225 pass |
 | `cd535ef` | session-restore probe + display probe | clean | 225 pass |
 | `37d862b` | docs | — | — |
@@ -187,9 +222,15 @@ Highest value first:
    asserts the ORDER `['proxy-test', 'launch']`, not merely that a test ran. If
    you can make the gate pass while the launcher still fires first, the gate is
    fake.
-3. **Attack the usability cost of the hard block.** A profile with a session and
-   an intermittent proxy is now unopenable. Is refusing right, or should there
-   be a "clear the session, then open" path?
+3. **Attack the usability cost of the hard blocks.** A profile with a session and
+   an intermittent proxy is now unopenable, and a profile whose engine changed
+   cannot be opened at all until the user accepts the engine. Both are
+   deliberate. Both are real friction. Is refusing right, or should there be a
+   "clear the session, then open" path?
+3b. **Attack the `unreadable` carve-out.** A binary that will not answer
+   `--version` still launches; only locking is refused. If you think an
+   unverifiable engine should block every launch, that is a defensible position
+   and the opposite of what is implemented.
 4. **Attack the single big commit** (`6b8b0be`). If you can find a green split,
    the argument for keeping it whole fails.
 5. **Attack C3.** Run the ablation the plan allows for (`--drop-arg`), and see

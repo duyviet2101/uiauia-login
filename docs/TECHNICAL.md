@@ -184,6 +184,10 @@ tiếp trong app bắt đầu chạy thì website đã nhận request rồi.
 Vì vậy toàn bộ cổng chặn nằm trong `BrowserManager.preflight()`, chạy trước khi gọi
 launcher:
 
+0. **Cổng engine — chạy cho MỌI lần mở, kể cả `force`.** Hỏi binary `--version`
+   (§6.2). Vấn đề dứt khoát (`not-installed`, `version-mismatch`,
+   `pin-unsatisfied`) → `EngineMismatchError`. Với profile đã khoá, engine đang
+   chạy khác bản đã khoá → `IdentityDriftError`, **kể cả khi `force`**.
 1. Profile **đã khoá** → so sánh identity (như §6). Lệch → `IdentityDriftError`.
 2. Profile **có proxy** → xác minh proxy ra được exit IP. Snapshot chỉ được dùng lại
    nếu **thành công, có exit IP, và mới dưới 90 giây**; snapshot thất bại không bao giờ
@@ -196,7 +200,15 @@ Ba điểm dễ hiểu nhầm:
 - **Lần mở đầu tiên vẫn cho qua** dù proxy hỏng. Cookie jar rỗng thì không có gì để
   replay; proxy hỏng chỉ tốn của người dùng một trang lỗi, không tạo liên kết.
 - **`forceLaunch` cũng chịu cổng này.** "Chấp nhận drift" nghĩa là bỏ qua *so sánh
-  identity*, không phải bỏ qua *xác minh exit*.
+  identity*, không phải bỏ qua *xác minh exit* — và cũng **không** phải bỏ qua engine.
+
+> **Sửa 2026-09-11 (review):** trước đó `force: true` bỏ qua **toàn bộ**
+> `checkLockedIdentity`, gồm cả engine. Giữ số version cũ trong store **không** giữ
+> được binary cũ trên đĩa: profile khoá ở 146, máy đã đổi sang bản khác, bấm
+> "Mở & cập nhật IP" thì profile vẫn mở bằng **bản mới** trong khi bản ghi và toast
+> đều nói engine không đổi. Nay engine được so ở bước 0 cho mọi lần mở; muốn đổi thì
+> phải chọn "Chấp nhận engine mới" — thao tác đó ghi lại version **trước** khi
+> preflight chạy, nên một engine đã được chấp nhận sẽ khớp khi tới cổng.
 - **Không có "mở bằng mọi giá".** Tab tự replay lúc khởi động, nên không có thời điểm
   nào để người dùng chen vào giữa. Muốn mở thì sửa proxy hoặc gỡ proxy khỏi profile.
 
@@ -237,12 +249,32 @@ Bốn tình huống được **báo**, không tình huống nào bị **tự s�
 | `version-mismatch` | package khai một đằng, binary khai một nẻo |
 | `pin-unsatisfied` | đặt `CLOAKBROWSER_VERSION` nhưng đang chạy bản khác |
 
-Có vấn đề thì App hiện banner; không có vấn đề thì im lặng — và im lặng ở đây nghĩa là
-**đã kiểm và khớp**, không phải "chưa kiểm". App không tự tải, không tự nâng, không tự
-hạ engine.
+Kết quả **được nối vào quyết định mở**, không chỉ hiện banner:
+
+- `not-installed` · `version-mismatch` · `pin-unsatisfied` → `EngineMismatchError`,
+  **chặn trước khi Chromium tồn tại** (nên trước cả session restore).
+- `unreadable` → **không** chặn mở: một binary không trả lời `--version` vẫn có thể là
+  bản đúng, chặn mọi lần mở vì một lỗi exec là đánh đổi tệ hơn. Nhưng nó **chặn việc
+  khoá identity mới** — không thể lấy một engine không gọi được tên làm baseline.
+- So sánh identity dùng **bản binary tự khai**, không dùng marker. Đây chính là chỗ mà
+  một `CLOAKBROWSER_BINARY_PATH` trỏ sang build khác từng vô hình.
+- Profile đã khoá được **pin** khi launch (`browserVersion` = marker vừa xác minh), nên
+  launcher không thể tự giải ra một build khác bản vừa kiểm.
+
+Đo 2026-09-11: pin bằng marker đang cài launch bình thường (Chrome/145.0.0.0, cùng
+binary với lúc không pin); pin vào một bản không tồn tại thì **báo lỗi rõ** (`HTTP 404`)
+chứ **không** âm thầm lùi về bản khác. Vì cổng engine chạy trước, launcher không bao giờ
+gặp một pin không thoả được.
+
+Pin lấy từ **marker vừa xác minh**, không lấy từ `resolvedIdentity.cloakBrowserVersion`:
+hai marker có thể trùng version Chromium nhưng khác số hiệu patch của CloakBrowser, và
+pin vào một patch chưa cài sẽ làm launcher đi tải.
+
+App không tự tải, không tự nâng, không tự hạ engine.
 
 Đo trên máy này 2026-09-11: marker `145.0.7632.109.2` · binary `145.0.7632.109` · tier
-`free` · `problems: []`.
+`free` · `verified: true` · `problems: []`. Một identity khoá ở `145.0.7632.109.2` khớp;
+khoá ở `146.0.7680.177.5` **không** khớp và bị chặn.
 
 > Trên darwin chỉ tồn tại **một** build công khai (findings §8d), nên pin version ở đây
 > không phải cần gạt thật. `CLOAKBROWSER_VERSION` được tôn trọng và báo khi không thoả,

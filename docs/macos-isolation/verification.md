@@ -116,12 +116,17 @@ xoá vì là script dùng một lần, không phải phần của harness.
 
    Kết quả ở findings §9e.
 
+8. **Pin engine có thật sự hoạt động không** — vì đây là một option mới trên đường
+   launch, nó được chạy thật chứ không chỉ suy luận: launch có pin bằng marker đang cài
+   (Chrome/145.0.0.0, cùng binary với lúc không pin), và launch với pin vào một bản
+   không tồn tại → `HTTP 404`, **không** âm thầm lùi về bản khác. Kết quả ở findings §9f.
+
 ## Kiểm thử đã chạy
 
 | Lệnh | Kết quả |
 |---|---|
 | `npx tsc --noEmit -p tsconfig.json` | sạch |
-| `npx vitest run` | **225 pass, 1 skip** (trước đợt này: 176 pass) |
+| `npx vitest run` | **235 pass, 1 skip** (trước đợt này: 176 pass) |
 | `npm run build` (electron-vite) | thành công |
 
 Ba test mới trong `tests/store.test.ts`: `defaultPlatformFor` chọn đúng persona theo
