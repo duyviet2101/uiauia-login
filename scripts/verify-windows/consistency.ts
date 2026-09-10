@@ -1,17 +1,25 @@
 import type { ProfileObservation, RuleResult, UaBrand } from './types';
+import type { Persona } from './persona';
+import { foreignTells, nativeTells } from './persona';
 
 /**
- * Per-profile plausibility checks. Each rule asks: does this profile look like
- * ONE coherent real Windows PC, with no contradiction a fingerprinter's
- * lie-detection would flag? pass / warn / fail + a human message.
+ * Per-profile plausibility checks, evaluated against the persona the profile
+ * CLAIMS to be. Each rule asks: does this profile look like ONE coherent real
+ * machine of that OS, with no contradiction a fingerprinter's lie-detection
+ * would flag? pass / warn / fail + a human message.
  *
- * Pure function — unit-tested with a clean fixture (all pass) and a
- * deliberately-broken one (forced SwiftShader / Windows UA + MacIntel platform).
+ * Persona matters: a Mac-run profile presenting a macOS persona must be judged
+ * by macOS expectations. The old harness applied Windows rules to every run,
+ * which is why a macOS run could not be assessed at all.
+ *
+ * Pure function — unit-tested with clean and deliberately-broken fixtures.
  */
-export function consistency(o: ProfileObservation): RuleResult[] {
+export function consistency(o: ProfileObservation, persona: Persona = o.persona ?? 'windows'): RuleResult[] {
   return [
-    platformCoherence(o),
-    webglRenderer(o),
+    platformCoherence(o, persona),
+    webglRenderer(o, persona),
+    renderStackCoherence(o),
+    fontStackCoherence(o, persona),
     screenGeViewport(o),
     webdriverFalse(o),
     canvasReal(o),
@@ -27,42 +35,161 @@ const pass = (rule: string, message: string): RuleResult => ({ rule, status: 'pa
 const warn = (rule: string, message: string): RuleResult => ({ rule, status: 'warn', message });
 const fail = (rule: string, message: string): RuleResult => ({ rule, status: 'fail', message });
 
-// --- 1. UA token ↔ navigator.platform ↔ UA-CH platform all "Windows" ----------
+const label = (persona: Persona): string => (persona === 'macos' ? 'macOS' : 'Windows');
 
-function platformCoherence(o: ProfileObservation): RuleResult {
+// --- 1. UA token <-> navigator.platform <-> UA-CH platform all one OS --------
+
+function platformCoherence(o: ProfileObservation, persona: Persona): RuleResult {
   const rule = 'platform-coherence';
-  const signals: { name: string; isWindows: boolean }[] = [
-    { name: `UA "${shortUa(o.userAgent)}"`, isWindows: /Windows NT/i.test(o.userAgent) },
-    { name: `navigator.platform "${o.platform}"`, isWindows: /^Win/i.test(o.platform) },
-  ];
-  const chPlatform = o.uaClientHints?.platform;
-  if (chPlatform) signals.push({ name: `UA-CH platform "${chPlatform}"`, isWindows: chPlatform === 'Windows' });
+  const matches = (uaOk: boolean, platformOk: boolean, chOk: boolean) => ({ uaOk, platformOk, chOk });
+  const m =
+    persona === 'macos'
+      ? matches(
+          /Mac OS X|Macintosh/i.test(o.userAgent),
+          /^Mac/i.test(o.platform),
+          (o.uaClientHints?.platform ?? 'macOS') === 'macOS',
+        )
+      : matches(
+          /Windows NT/i.test(o.userAgent),
+          /^Win/i.test(o.platform),
+          (o.uaClientHints?.platform ?? 'Windows') === 'Windows',
+        );
 
-  const offenders = signals.filter((s) => !s.isWindows).map((s) => s.name);
+  const signals: { name: string; okay: boolean }[] = [
+    { name: `UA "${shortUa(o.userAgent)}"`, okay: m.uaOk },
+    { name: `navigator.platform "${o.platform}"`, okay: m.platformOk },
+  ];
+  if (o.uaClientHints?.platform) {
+    signals.push({ name: `UA-CH platform "${o.uaClientHints.platform}"`, okay: m.chOk });
+  }
+
+  const offenders = signals.filter((s) => !s.okay).map((s) => s.name);
   if (offenders.length === signals.length) {
-    return fail(rule, `No signal reports Windows (${offenders.join('; ')}).`);
+    return fail(rule, `No signal reports ${label(persona)} (${offenders.join('; ')}).`);
   }
   if (offenders.length > 0) {
-    return fail(rule, `Platform signals disagree — non-Windows: ${offenders.join('; ')}.`);
+    return fail(rule, `Platform signals disagree — not ${label(persona)}: ${offenders.join('; ')}.`);
   }
-  return pass(rule, 'UA, navigator.platform and UA-CH all report Windows.');
+  return pass(rule, `UA, navigator.platform and UA-CH all report ${label(persona)}.`);
 }
 
-// --- 2. WebGL renderer is a plausible Windows GPU -----------------------------
+// --- 2. WebGL renderer is plausible for the claimed OS -----------------------
 
-const BAD_RENDERER = ['swiftshader', 'llvmpipe', 'apple', 'software', 'microsoft basic render', 'mesa'];
+const SOFTWARE_RENDERERS = ['swiftshader', 'llvmpipe', 'software', 'microsoft basic render', 'mesa'];
+/** Strings that betray a non-Windows GPU when the persona claims Windows. */
+const NON_WINDOWS_RENDERERS = ['apple'];
+/** Strings that betray a non-Mac GPU when the persona claims macOS. */
+const NON_MACOS_RENDERERS = ['direct3d', 'd3d11', 'nvidia', 'radeon', 'intel(r)'];
 
-function webglRenderer(o: ProfileObservation): RuleResult {
+function webglRenderer(o: ProfileObservation, persona: Persona): RuleResult {
   const rule = 'webgl-renderer';
   const r = (o.webglRenderer ?? '').trim();
   if (!r) return fail(rule, 'WebGL renderer is blank/unavailable (a tell on a real GPU machine).');
   const lower = r.toLowerCase();
-  const hit = BAD_RENDERER.find((bad) => lower.includes(bad));
-  if (hit) return fail(rule, `WebGL renderer "${r}" looks non-Windows / software (matched "${hit}").`);
-  return pass(rule, `WebGL renderer "${r}" is a plausible Windows GPU.`);
+
+  const software = SOFTWARE_RENDERERS.find((bad) => lower.includes(bad));
+  if (software) return fail(rule, `WebGL renderer "${r}" is software rendering (matched "${software}").`);
+
+  const foreign = (persona === 'macos' ? NON_MACOS_RENDERERS : NON_WINDOWS_RENDERERS)
+    .find((bad) => lower.includes(bad));
+  if (foreign) {
+    return fail(rule, `WebGL renderer "${r}" contradicts the ${label(persona)} persona (matched "${foreign}").`);
+  }
+  return pass(rule, `WebGL renderer "${r}" is plausible for ${label(persona)}.`);
 }
 
-// --- 3. screen >= viewport ----------------------------------------------------
+// --- 3. Renderer STRING vs the real rendering backend ------------------------
+
+/** Compressed-texture formats only mobile/Apple GPUs expose. A desktop
+ *  Direct3D11 adapter does not support PVRTC or ASTC. */
+const APPLE_GPU_EXTENSIONS = [
+  'webgl_compressed_texture_pvrtc',
+  'webkit_webgl_compressed_texture_pvrtc',
+  'webgl_compressed_texture_astc',
+  'webgl_compressed_texture_etc',
+];
+/** Desktop-only formats an Apple GPU does not expose. */
+const DESKTOP_GPU_EXTENSIONS = ['ext_texture_compression_bptc', 'ext_texture_compression_rgtc'];
+
+/**
+ * A spoofed renderer string can claim any GPU; the WebGL extension list comes
+ * from the driver that is actually running. When the two disagree, a detector
+ * that reads both sees the lie. This mirrors that check.
+ */
+function renderStackCoherence(o: ProfileObservation): RuleResult {
+  const rule = 'render-stack-coherence';
+  const extensions = o.webglExtensions;
+  if (!extensions || extensions.length === 0) {
+    return warn(rule, 'WebGL extension list not captured; cannot cross-check the renderer string.');
+  }
+  const renderer = (o.webglRenderer ?? '').toLowerCase();
+  if (!renderer) return warn(rule, 'No renderer string to cross-check.');
+
+  const lower = extensions.map((e) => e.toLowerCase());
+  const appleHits = APPLE_GPU_EXTENSIONS.filter((e) => lower.includes(e));
+  const desktopHits = DESKTOP_GPU_EXTENSIONS.filter((e) => lower.includes(e));
+  const claimsDirect3D = /direct3d|d3d11/.test(renderer);
+  const claimsApple = /apple/.test(renderer);
+
+  if (claimsDirect3D && appleHits.length > 0) {
+    return fail(
+      rule,
+      `Renderer claims Direct3D11 but the driver exposes Apple/mobile GPU extensions (${appleHits.join(', ')}) — the real backend is not D3D11.`,
+    );
+  }
+  if (claimsApple && desktopHits.length > 0 && appleHits.length === 0) {
+    return fail(
+      rule,
+      `Renderer claims an Apple GPU but exposes desktop-only extensions (${desktopHits.join(', ')}).`,
+    );
+  }
+  return pass(rule, `Renderer string and WebGL extension set agree (${extensions.length} extensions).`);
+}
+
+// --- 4. Font stack vs claimed OS ---------------------------------------------
+
+/**
+ * Fonts are supplied by the host OS. If a "Windows" browser cannot see a single
+ * Windows-only family but does see Mac-only ones, its text rendering betrays the
+ * real host — the same signal a font-metrics fingerprinter reads.
+ */
+function fontStackCoherence(o: ProfileObservation, persona: Persona): RuleResult {
+  const rule = 'font-stack-coherence';
+  if (!o.fonts || o.fonts.length === 0) return warn(rule, 'No font probe results to evaluate.');
+  const available = new Set(o.fonts.filter((f) => f.available).map((f) => f.family.toLowerCase()));
+  const probed = new Set(o.fonts.map((f) => f.family.toLowerCase()));
+
+  const native = nativeTells(persona).filter((f) => probed.has(f.toLowerCase()));
+  const foreign = foreignTells(persona).filter((f) => probed.has(f.toLowerCase()));
+  if (native.length === 0 && foreign.length === 0) {
+    return warn(rule, 'Dictionary contains no OS-specific tells; cannot evaluate the font stack.');
+  }
+
+  const nativeSeen = native.filter((f) => available.has(f.toLowerCase()));
+  const foreignSeen = foreign.filter((f) => available.has(f.toLowerCase()));
+
+  if (foreignSeen.length > 0 && nativeSeen.length === 0) {
+    return fail(
+      rule,
+      `Font stack contradicts the ${label(persona)} persona: none of its own fonts are present, but foreign-OS fonts are (${foreignSeen.join(', ')}).`,
+    );
+  }
+  if (foreignSeen.length > nativeSeen.length) {
+    return fail(
+      rule,
+      `Font stack leans to the wrong OS for a ${label(persona)} persona: ${foreignSeen.length} foreign vs ${nativeSeen.length} native tells (foreign: ${foreignSeen.join(', ')}).`,
+    );
+  }
+  if (nativeSeen.length === 0) {
+    return warn(rule, `No ${label(persona)} font tells detected; the font stack could not be confirmed.`);
+  }
+  return pass(
+    rule,
+    `Font stack matches the ${label(persona)} persona (${nativeSeen.length} native tell(s), ${foreignSeen.length} foreign).`,
+  );
+}
+
+// --- 5. screen >= viewport ---------------------------------------------------
 
 function screenGeViewport(o: ProfileObservation): RuleResult {
   const rule = 'screen-ge-viewport';
@@ -72,10 +199,10 @@ function screenGeViewport(o: ProfileObservation): RuleResult {
   if (o.screen.width < o.innerWidth || o.screen.height < o.innerHeight) {
     return fail(rule, `screen ${o.screen.width}x${o.screen.height} is smaller than viewport ${o.innerWidth}x${o.innerHeight}.`);
   }
-  return pass(rule, `screen ${o.screen.width}x${o.screen.height} ≥ viewport ${o.innerWidth}x${o.innerHeight}.`);
+  return pass(rule, `screen ${o.screen.width}x${o.screen.height} >= viewport ${o.innerWidth}x${o.innerHeight}.`);
 }
 
-// --- 4. navigator.webdriver === false -----------------------------------------
+// --- 6. navigator.webdriver === false ----------------------------------------
 
 function webdriverFalse(o: ProfileObservation): RuleResult {
   const rule = 'webdriver-false';
@@ -84,46 +211,57 @@ function webdriverFalse(o: ProfileObservation): RuleResult {
     : pass(rule, 'navigator.webdriver is false.');
 }
 
-// --- 5. canvas hash is a real value -------------------------------------------
+// --- 7. canvas digest is a real value ----------------------------------------
 
 function canvasReal(o: ProfileObservation): RuleResult {
   const rule = 'canvas-real';
+  const measured = o.measurements?.canvasText;
+  if (measured && measured.status !== 'ok') {
+    return fail(rule, `canvas measurement did not succeed (${measured.status}: ${measured.reason}).`);
+  }
   if (!o.canvasHash || ['no-canvas', 'canvas-error'].includes(o.canvasHash)) {
     return fail(rule, `canvas hash is not a real value ("${o.canvasHash}").`);
   }
   return pass(rule, `canvas hash is a real value (${o.canvasHash}).`);
 }
 
-// --- 6. audio hash is non-null ------------------------------------------------
+// --- 8. audio digest present --------------------------------------------------
 
 function audioPresent(o: ProfileObservation): RuleResult {
   const rule = 'audio-present';
+  const measured = o.measurements?.audio;
+  if (measured && measured.status === 'unsupported') {
+    return warn(rule, `audio API unavailable in this context (${measured.reason}).`);
+  }
+  if (measured && measured.status === 'error') {
+    return fail(rule, `audio measurement failed (${measured.reason}).`);
+  }
   return o.audioHash
     ? pass(rule, `audio hash present (${o.audioHash}).`)
-    : fail(rule, 'audio hash is null — a missing audio fingerprint on Windows is itself a tell.');
+    : fail(rule, 'audio hash is null — a missing audio fingerprint is itself a tell.');
 }
 
-// --- 7a. hardwareConcurrency in [2, 32] ---------------------------------------
+// --- 9a. hardwareConcurrency in [2, 32] --------------------------------------
 
 function coresRange(o: ProfileObservation): RuleResult {
   const rule = 'cores-range';
   const n = o.hardwareConcurrency;
   return n >= 2 && n <= 32
-    ? pass(rule, `hardwareConcurrency ${n} ∈ [2, 32].`)
+    ? pass(rule, `hardwareConcurrency ${n} in [2, 32].`)
     : fail(rule, `hardwareConcurrency ${n} is outside the plausible [2, 32] range.`);
 }
 
-// --- 7b. deviceMemory in {2, 4, 8} --------------------------------------------
+// --- 9b. deviceMemory in {2, 4, 8} -------------------------------------------
 
 function deviceMemory(o: ProfileObservation): RuleResult {
   const rule = 'device-memory';
   if (o.deviceMemory == null) return warn(rule, 'deviceMemory not exposed by navigator.');
   return [2, 4, 8].includes(o.deviceMemory)
-    ? pass(rule, `deviceMemory ${o.deviceMemory} ∈ {2, 4, 8}.`)
+    ? pass(rule, `deviceMemory ${o.deviceMemory} in {2, 4, 8}.`)
     : fail(rule, `deviceMemory ${o.deviceMemory} is not a realistic capped value (expected 2, 4 or 8).`);
 }
 
-// --- 8. UA-CH Chromium brand version matches the UA Chrome major --------------
+// --- 10. UA-CH Chromium brand version matches the UA Chrome major ------------
 
 function isRealChromiumBrand(b: UaBrand): boolean {
   const brand = b.brand.toLowerCase();
@@ -155,7 +293,7 @@ function uaChVersionMatch(o: ProfileObservation): RuleResult {
     : fail(rule, `UA Chrome ${uaMajor} disagrees with UA-CH ${brand.brand} ${brandMajor}.`);
 }
 
-// --- 9. Date.getTimezoneOffset() consistent with the Intl timezone ------------
+// --- 11. Date.getTimezoneOffset() consistent with the Intl timezone ----------
 
 /**
  * Offset of an IANA zone at a given instant, in Date.getTimezoneOffset() sign

@@ -55,7 +55,7 @@ describe('buildReport verdict', () => {
   it('ATTENTION and names the vector on a HIGH collision', () => {
     const report = buildReport(META, [obs('p1', { fontHash: 'X' }), obs('p2', { fontHash: 'X' })]);
     expect(report.verdict).toMatch(/^ATTENTION/);
-    expect(report.verdict).toContain('fontHash');
+    expect(report.verdict).toContain('font.availability');
   });
 
   it('ATTENTION on a consistency failure (SwiftShader renderer)', () => {
@@ -66,7 +66,7 @@ describe('buildReport verdict', () => {
 
   it('counts failed-to-launch profiles in the verdict', () => {
     const report = buildReport(META, [obs('p1'), errorObservation('p2', 'p2', 2, 'boom')]);
-    expect(report.verdict).toContain('failed to launch');
+    expect(report.verdict).toContain('measurement(s) failed');
   });
 });
 

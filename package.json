@@ -12,7 +12,9 @@
     "dist:win": "electron-vite build && electron-builder --win",
     "test": "vitest run",
     "test:watch": "vitest",
-    "verify:windows": "tsx scripts/verify-windows/cli.ts"
+    "verify:windows": "tsx scripts/verify-windows/cli.ts --persona windows",
+    "verify": "tsx scripts/verify-windows/cli.ts",
+    "verify:mac": "tsx scripts/verify-windows/cli.ts --persona macos"
   },
   "keywords": [],
   "author": "",

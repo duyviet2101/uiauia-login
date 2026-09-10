@@ -1,8 +1,25 @@
-// Data shapes for the Windows anti-detect verification harness.
+// Data shapes for the cross-persona anti-detect verification harness.
 //
-// A ProfileObservation is the full fingerprint vector set captured from one
-// throwaway profile's browser window. The pure analyses (collisions,
-// consistency) consume these; the probe produces them.
+// A ProfileObservation is one measurement pass over one throwaway profile's
+// browser window. The pure analyses (collisions, consistency, stability) consume
+// these; the probe produces them.
+//
+// Naming note: this directory is still `verify-windows` so the historical report
+// under reports/ keeps its referenced path, but the harness is persona-driven and
+// runs on macOS and Windows alike.
+
+import type {
+  AudioSample,
+  CanvasSample,
+  ClientRectSample,
+  FontAvailabilitySample,
+  FontMetricsSample,
+  Measured,
+  WebrtcSample,
+} from './measure';
+import type { Persona } from './persona';
+
+export type LaunchMode = 'app' | 'minimal';
 
 export interface UaBrand {
   brand: string;
@@ -42,7 +59,18 @@ export interface WebglParams {
   glVersion: string | null;
 }
 
-/** The richer vector set the in-page probe returns (browser-side, no profile metadata). */
+/** The rich, status-carrying measurements. Optional so older fixtures still typecheck. */
+export interface Measurements {
+  canvasText: Measured<CanvasSample>;
+  canvasGeometry: Measured<CanvasSample>;
+  audio: Measured<AudioSample>;
+  fontAvailability: Measured<FontAvailabilitySample>;
+  fontMetrics: Measured<FontMetricsSample>;
+  clientRects: Measured<ClientRectSample>;
+  webrtc: Measured<WebrtcSample>;
+}
+
+/** The vector set the in-page probe returns (browser-side, no profile metadata). */
 export interface RawObservation {
   userAgent: string;
   uaClientHints: UaClientHints | null;
@@ -61,12 +89,16 @@ export interface RawObservation {
   webglVendor: string | null;
   webglRenderer: string | null;
   webglParams: WebglParams;
+  /** Sorted WebGL extension list — the tell for the REAL rendering backend. */
+  webglExtensions?: string[];
+  /** Legacy flat digests (now SHA-256 prefixes) kept for the collision matrix. */
   canvasHash: string;
   canvasWinding: boolean | null;
   audioHash: string | null;
   fontHash: string;
   fonts: { family: string; available: boolean }[];
   clientRectsHash: string;
+  measurements?: Measurements;
 }
 
 /** Best-effort headline numbers scraped from an external detector site. */
@@ -89,12 +121,27 @@ export interface ProfileObservation extends RawObservation {
   error?: string;
   external?: ExternalSiteResult[];
   capturedAt: string;
+  // --- run context (optional so older fixtures still typecheck) -------------
+  persona?: Persona;
+  launchMode?: LaunchMode;
+  /** 1-based index of the browser open this measurement came from. */
+  openIndex?: number;
+  /** 1-based index of the measurement within that open. */
+  measureIndex?: number;
+  /** Matrix group label, e.g. "A", "B", "C". */
+  group?: string;
+  /** Version reported by the browser binary actually launched. */
+  browserVersion?: string;
+  /** npm package version of the cloakbrowser wrapper. */
+  packageVersion?: string;
+  /** The exact Chromium args this launch used. */
+  launchArgs?: string[];
 }
 
 export type CollisionSeverity = 'HIGH' | 'CONTEXT';
 
 export interface CollisionGroup {
-  /** The shared value (stringified) that ≥2 profiles have in common. */
+  /** The shared value (stringified) that >=2 profiles have in common. */
   value: string;
   profileIds: string[];
 }
@@ -119,6 +166,7 @@ export function errorObservation(
   profileName: string,
   seed: number,
   error: string,
+  context: Partial<ProfileObservation> = {},
 ): ProfileObservation {
   return {
     profileId,
@@ -151,6 +199,7 @@ export function errorObservation(
       shadingLanguageVersion: null,
       glVersion: null,
     },
+    webglExtensions: [],
     canvasHash: '',
     canvasWinding: null,
     audioHash: null,
@@ -158,5 +207,6 @@ export function errorObservation(
     fonts: [],
     clientRectsHash: '',
     capturedAt: new Date().toISOString(),
+    ...context,
   };
 }
