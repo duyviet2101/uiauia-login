@@ -68,7 +68,20 @@ function hardwareProfileFor(p: Profile, frozen: Fingerprint | null, seed: number
   return deriveHardwareProfile(seed);
 }
 
-export function buildLaunchArgs(p: Profile, display: Display = DEFAULT_DISPLAY): LaunchPersistentContextOptions {
+/**
+ * @param enginePin exact engine marker to launch with. BrowserManager passes the
+ *   marker its preflight just VERIFIED against the binary on disk, so the
+ *   launcher cannot resolve a different build than the one that was checked.
+ *   Deliberately not `resolvedIdentity.cloakBrowserVersion`: two markers can
+ *   share a Chromium version but differ in CloakBrowser's patch revision, and
+ *   pinning a revision that is not installed makes the launcher try to download
+ *   it. Callers that omit this (the verify harness) launch unpinned, as before.
+ */
+export function buildLaunchArgs(
+  p: Profile,
+  display: Display = DEFAULT_DISPLAY,
+  enginePin?: string,
+): LaunchPersistentContextOptions {
   const locked = p.identityLocked ? p.resolvedIdentity : null;
   if (p.identityLocked && !locked) throw new Error('Profile identity is locked but resolved identity is missing.');
   const seed = locked?.seed ?? p.seed;
@@ -120,6 +133,11 @@ export function buildLaunchArgs(p: Profile, display: Display = DEFAULT_DISPLAY):
   return {
     userDataDir: p.userDataDir,
     headless: false,
+    // Verified against the binary before we got here (BrowserManager.preflight),
+    // so the launcher cannot quietly resolve a different build than the one the
+    // engine check passed. An unsatisfiable pin fails loudly rather than falling
+    // back — measured — which is why it must be a marker we know is installed.
+    ...(enginePin ? { browserVersion: enginePin } : {}),
     // A fixed viewport enables Playwright's device-metrics override. On the
     // patched Windows browser that override can fight fullscreen/maximize on
     // each new tab, moving the native window. null keeps sizing fully native.

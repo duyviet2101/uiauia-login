@@ -2,6 +2,7 @@ import { binaryInfo } from 'cloakbrowser';
 import type { Profile, ProxyCheckSnapshot, ResolvedIdentity, Fingerprint, ProxyConfig, IdentityDrift, IdentityPreflightResult } from './types';
 import { IdentityDriftError, type ProxyTestResult } from './types';
 import { ProxyTester } from './proxy-tester';
+import { chromiumPartOf } from './engine-info';
 
 type VersionProvider = () => string;
 
@@ -69,7 +70,12 @@ export class IdentityService {
     private versionProvider: VersionProvider = currentVersion,
   ) {}
 
-  async checkLockedIdentity(profile: Profile): Promise<IdentityPreflightResult> {
+  /**
+   * @param runningEngine what the BINARY reports it is, when that could be
+   *   established. Falls back to the package marker — which is what this used to
+   *   compare unconditionally, and the reason a swapped binary was invisible.
+   */
+  async checkLockedIdentity(profile: Profile, runningEngine?: string | null): Promise<IdentityPreflightResult> {
     const drift: IdentityDrift[] = [];
     const locked = profile.resolvedIdentity;
     if (!profile.identityLocked) return { ok: true, drift };
@@ -78,7 +84,14 @@ export class IdentityService {
       return { ok: false, drift };
     }
 
-    this.compare(drift, 'cloakBrowserVersion', locked.cloakBrowserVersion, this.versionProvider());
+    // Compared on the Chromium part: a locked identity stores the package marker
+    // (145.0.7632.109.2) while a binary reports only 145.0.7632.109.
+    this.compare(
+      drift,
+      'cloakBrowserVersion',
+      chromiumPartOf(locked.cloakBrowserVersion),
+      runningEngine ?? chromiumPartOf(this.versionProvider()),
+    );
     this.compare(drift, 'seed', String(locked.seed), String(profile.seed));
     this.compare(drift, 'platform', locked.platform, profile.platform);
     this.compare(drift, 'proxy', proxyValue(locked.proxy), proxyValue(profile.proxy));

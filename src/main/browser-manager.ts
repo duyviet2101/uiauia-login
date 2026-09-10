@@ -7,7 +7,8 @@ import { buildLaunchArgs, type Display } from './launch-args';
 import { captureFingerprint, captureFingerprintDiagnostics } from './fingerprint-probe';
 import { IdentityService } from './identity-service';
 import { proxyWarnings } from './unlinkability';
-import { IdentityDriftError, ProxyPreflightError, type Fingerprint, type FingerprintBaseline, type FingerprintDiagnostics, type LaunchResult, type Profile, type ProxyCheckSnapshot, type ProxyPrecheckResult } from './types';
+import { EngineMismatchError, IdentityDriftError, ProxyPreflightError, type Fingerprint, type FingerprintBaseline, type FingerprintDiagnostics, type LaunchResult, type Profile, type ProxyCheckSnapshot, type ProxyPrecheckResult } from './types';
+import { engineMatchesLocked, isBlocking, readEngineInfo, runningVersion, type EngineInfo } from './engine-info';
 import { NullProfileWindowService, type ProfileWindowService } from './profile-window-service';
 import { prepareBrowserPreferences, type BrowserPreferencesOptions } from './browser-preferences';
 
@@ -33,6 +34,8 @@ export class BrowserManager extends EventEmitter {
     private displayProvider: () => Display = () => ({ width: 1920, height: 1080 }),
     private profileWindowService: ProfileWindowService = new NullProfileWindowService(),
     private preferencesPreparer: PreferencesPreparer = prepareBrowserPreferences,
+    /** Asks the binary what it is. Injected so tests can drive every engine state. */
+    private engineProvider: () => Promise<EngineInfo> = readEngineInfo,
   ) { super(); }
 
   /**
@@ -57,7 +60,7 @@ export class BrowserManager extends EventEmitter {
 
     // Every check that could stop this launch happens here, before Chromium
     // exists. Past `this.launcher(...)` there is no gate left — see preflight().
-    const snapshot = await this.preflight(id, profile, opts);
+    const { snapshot, engine } = await this.preflight(id, profile, opts);
 
     try {
       await this.preferencesPreparer(profile.userDataDir, {
@@ -70,7 +73,12 @@ export class BrowserManager extends EventEmitter {
       console.warn(`[browser-preferences] Could not prepare profile ${id}:`, error);
     }
 
-    const ctx = await this.launcher(buildLaunchArgs(profile, this.displayProvider()));
+    // Locked profiles launch pinned to the engine preflight just verified.
+    const ctx = await this.launcher(buildLaunchArgs(
+      profile,
+      this.displayProvider(),
+      profile.identityLocked ? engine.markerVersion : undefined,
+    ));
     this.running.set(id, ctx);
     ctx.on('close', () => {
       this.profileWindowService.detach(id);
@@ -118,8 +126,14 @@ export class BrowserManager extends EventEmitter {
     // Lock on the snapshot preflight already took. This used to run its own
     // checkProxy here, which is why an unlocked profile's proxy was first tested
     // AFTER the session had been restored.
+    // An identity may only be locked onto an engine we could actually name. The
+    // whole point of the lock is that a later launch can be compared against it;
+    // baselining onto an unverified marker would make that comparison fiction.
     let lockedNow = false;
-    if (!profile.identityLocked && profile.proxy && fingerprint && snapshot?.ok && snapshot.exitIp) {
+    if (!profile.identityLocked && !engine.verified && profile.proxy) {
+      console.warn(`[engine] Not locking ${id}: the running engine could not be verified.`);
+    }
+    if (!profile.identityLocked && engine.verified && profile.proxy && fingerprint && snapshot?.ok && snapshot.exitIp) {
       const identity = this.identityService.lockIdentityFromLaunch(profile, fingerprint, visitorId, snapshot);
       await this.store.lockIdentity(id, identity, snapshot);
       lockedNow = true;
@@ -267,15 +281,40 @@ export class BrowserManager extends EventEmitter {
     id: string,
     profile: Profile,
     opts: { force?: boolean },
-  ): Promise<ProxyCheckSnapshot | undefined> {
+  ): Promise<{ snapshot: ProxyCheckSnapshot | undefined; engine: EngineInfo }> {
     let snapshot: ProxyCheckSnapshot | undefined;
 
+    // --- engine gate -------------------------------------------------------
+    // Asked on EVERY launch, `force` included. Keeping the old version number in
+    // the store does not keep the old binary on disk: if the engine changed,
+    // "open and accept the new IP" would otherwise open the profile on the new
+    // engine while the record — and the toast — said the engine was untouched.
+    const engine = await this.engineProvider();
+    const blocking = engine.problems.filter(isBlocking);
+    if (blocking.length > 0) throw new EngineMismatchError(blocking);
+
     if (profile.identityLocked && !opts.force) {
-      const result = await this.identityService.checkLockedIdentity(profile);
+      // Compared against what the BINARY reports, not the package marker.
+      const result = await this.identityService.checkLockedIdentity(profile, runningVersion(engine));
       // Persist a freshly-fetched proxy check so the next open can reuse it (TTL).
       if (result.snapshot && !result.fromCache) await this.store.setLastProxyCheck(id, result.snapshot);
       if (!result.ok) throw new IdentityDriftError(result.drift);
       snapshot = result.snapshot;
+    } else if (
+      profile.identityLocked
+      && profile.resolvedIdentity
+      && !engineMatchesLocked(profile.resolvedIdentity.cloakBrowserVersion, engine)
+    ) {
+      // The forced path. `force` means "I accept the drift I was shown" — and an
+      // engine change is not what was shown when the user asked to update an IP.
+      // Accepting the engine is its own action (forceLaunch({acceptEngine}) or
+      // acceptEngineVersion), which rewrites the locked version BEFORE this runs,
+      // so an accepted engine reaches here already matching.
+      throw new IdentityDriftError([{
+        field: 'cloakBrowserVersion',
+        expected: profile.resolvedIdentity.cloakBrowserVersion,
+        actual: runningVersion(engine),
+      }]);
     }
 
     if (profile.proxy && !snapshot) {
@@ -294,7 +333,7 @@ export class BrowserManager extends EventEmitter {
       throw new ProxyPreflightError(snapshot?.error ?? 'Proxy không trả về exit IP.', snapshot);
     }
 
-    return snapshot;
+    return { snapshot, engine };
   }
 
   /**

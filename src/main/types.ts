@@ -326,6 +326,20 @@ export class ProxyPreflightError extends Error {
   }
 }
 
+/**
+ * Thrown before launch when the engine on disk is not the one the app is
+ * about to record. Distinct from IdentityDriftError: nothing about the profile
+ * has drifted — the app's own idea of which browser it is running is wrong, and
+ * that would poison whatever it wrote next.
+ */
+export class EngineMismatchError extends Error {
+  readonly code = 'ENGINE_MISMATCH_BLOCKED';
+
+  constructor(public readonly problems: { kind: string; message: string }[]) {
+    super(`Engine mismatch: ${problems.map((p) => p.kind).join(', ')}`);
+  }
+}
+
 export interface LaunchResult {
   launched: true;
   lockedNow: boolean;

@@ -1,4 +1,30 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+/**
+ * The engine the binary "reports" during these tests.
+ *
+ * BrowserManager asks on every launch, and the real implementation execs
+ * Chromium — which a unit test must not do. Only `readEngineInfo` is replaced;
+ * the comparison helpers stay real, so these tests exercise the actual matching
+ * logic rather than a stub of it.
+ */
+const engineState = vi.hoisted(() => ({
+  current: {
+    markerVersion: '146', binaryVersion: '146' as string | null, bundledVersion: '146',
+    tier: 'free', platform: 'test', binaryPath: '/fake/chrome',
+    installed: true, requestedVersion: null as string | null, verified: true,
+    problems: [] as { kind: string; message: string }[],
+  },
+}));
+
+vi.mock('../src/main/engine-info', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/main/engine-info')>()),
+  readEngineInfo: async () => engineState.current,
+}));
+
+function setEngine(over: Partial<typeof engineState.current>): void {
+  engineState.current = { ...engineState.current, ...over };
+}
 import { mkdtempSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -6,7 +32,7 @@ import { EventEmitter } from 'events';
 import { ProfileStore } from '../src/main/store';
 import { BrowserManager } from '../src/main/browser-manager';
 import type { Fingerprint, FingerprintDiagnostics, ProxyTestResult } from '../src/main/types';
-import { ProxyPreflightError } from '../src/main/types';
+import { EngineMismatchError, IdentityDriftError, ProxyPreflightError } from '../src/main/types';
 import { IdentityService } from '../src/main/identity-service';
 
 function fakeContext(url = 'about:blank') {
@@ -69,6 +95,12 @@ async function setupWithProxy() {
 }
 
 describe('BrowserManager', () => {
+  beforeEach(() => {
+    setEngine({
+      markerVersion: '146', binaryVersion: '146', verified: true, installed: true, problems: [],
+    });
+  });
+
   it('keeps launch successful when native window customization is unavailable', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'cloak-'));
     const store = new ProfileStore(dir, { idGen: () => 'p1', seedGen: () => 9 });
@@ -281,31 +313,101 @@ describe('BrowserManager', () => {
     expect(p.baseline).toEqual(lockedFp);
   });
 
-  it('forceLaunch keeps the locked engine version unless the caller accepts it', async () => {
+  it('forceLaunch REFUSES to open on a changed engine unless the caller accepts it', async () => {
+    // Reported by review: keeping the old version number in the store does not
+    // keep the old binary on disk. `force` skipped the whole identity check, so
+    // "Mở & cập nhật IP" opened the profile on the NEW engine while the record
+    // and the toast both said the engine was untouched. The old version of this
+    // test only asserted the stored number and let that through.
     const dir = mkdtempSync(join(tmpdir(), 'cloak-'));
     const store = new ProfileStore(dir, { idGen: () => 'p1', seedGen: () => 9 });
     await store.init();
     await store.create({ name: 'A', proxy: { type: 'http', host: 'h', port: 80 } });
-    const ctx = fakeContext();
     let version = '146';
     const identity = new IdentityService(
       { test: vi.fn(async () => ({ ok: true, exitIp: '9.9.9.9' })) } as any,
       () => version,
     );
-    const mgr = new BrowserManager(store, vi.fn(async () => ctx), vi.fn(async () => fakeFp), undefined, identity);
+    const launcher = vi.fn(async () => fakeContext());
+    const mgr = new BrowserManager(store, launcher, vi.fn(async () => fakeFp), undefined, identity);
 
     await mgr.launch('p1'); // auto-lock on engine 146
     await mgr.stop('p1');
-    version = '999'; // the engine was upgraded underneath the profile
 
-    await mgr.forceLaunch('p1');
+    // The engine was replaced underneath the profile.
+    version = '999';
+    setEngine({ markerVersion: '999', binaryVersion: '999' });
+    const launchesBefore = launcher.mock.calls.length;
+
+    await expect(mgr.forceLaunch('p1')).rejects.toBeInstanceOf(IdentityDriftError);
+    expect(launcher.mock.calls.length).toBe(launchesBefore); // no browser opened
     expect(store.get('p1')!.resolvedIdentity?.cloakBrowserVersion).toBe('146');
     expect(store.get('p1')!.resolvedIdentity?.engineAcceptedAt).toBeUndefined();
-    await mgr.stop('p1');
 
+    // Accepting the engine is a separate, explicit decision — and only then does
+    // the profile open.
     await mgr.forceLaunch('p1', { acceptEngine: true });
+    expect(launcher.mock.calls.length).toBe(launchesBefore + 1);
     expect(store.get('p1')!.resolvedIdentity?.cloakBrowserVersion).toBe('999');
     expect(store.get('p1')!.resolvedIdentity?.engineAcceptedAt).toBeTruthy();
+  });
+
+  it('names the RUNNING engine in the drift, not the package marker', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cloak-'));
+    const store = new ProfileStore(dir, { idGen: () => 'p1', seedGen: () => 9 });
+    await store.init();
+    await store.create({ name: 'A', proxy: { type: 'http', host: 'h', port: 80 } });
+    const identity = new IdentityService(
+      { test: vi.fn(async () => ({ ok: true, exitIp: '9.9.9.9' })) } as any,
+      () => '146',
+    );
+    const mgr = new BrowserManager(store, vi.fn(async () => fakeContext()), vi.fn(async () => fakeFp), undefined, identity);
+    await mgr.launch('p1');
+    await mgr.stop('p1');
+
+    // The package still resolves 146; the file on disk is something else. This
+    // is the case the marker alone can never see.
+    setEngine({ markerVersion: '146', binaryVersion: '151.0.7922.108' });
+
+    await expect(mgr.launch('p1')).rejects.toMatchObject({
+      drift: [{ field: 'cloakBrowserVersion', expected: '146', actual: '151.0.7922.108' }],
+    });
+  });
+
+  it('blocks every launch when the engine problem is definite', async () => {
+    const { mgr, launcher } = await setup();
+    setEngine({
+      problems: [{ kind: 'version-mismatch', message: 'package says 146, binary says 151' }],
+    });
+    await expect(mgr.launch('p1')).rejects.toBeInstanceOf(EngineMismatchError);
+    expect(launcher).not.toHaveBeenCalled();
+  });
+
+  it('does not block on an unreadable binary, but refuses to LOCK an identity onto it', async () => {
+    // A binary that will not answer --version may still be the right one, so
+    // refusing every launch would be the worse trade. Baselining an identity
+    // onto an engine we cannot name is a different matter.
+    const dir = mkdtempSync(join(tmpdir(), 'cloak-'));
+    const store = new ProfileStore(dir, { idGen: () => 'p1', seedGen: () => 9 });
+    await store.init();
+    await store.create({ name: 'A', proxy: { type: 'http', host: 'h', port: 80 } });
+    const identity = new IdentityService(
+      { test: vi.fn(async () => ({ ok: true, exitIp: '9.9.9.9' })) } as any,
+      () => '146',
+    );
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    setEngine({
+      binaryVersion: null,
+      verified: false,
+      problems: [{ kind: 'unreadable', message: 'no answer' }],
+    });
+    const mgr = new BrowserManager(store, vi.fn(async () => fakeContext()), vi.fn(async () => fakeFp), undefined, identity);
+
+    const result = await mgr.launch('p1');
+    expect(result.launched).toBe(true);
+    expect(result.lockedNow).toBe(false);
+    expect(store.get('p1')!.identityLocked).toBe(false);
+    warn.mockRestore();
   });
 
   it('acceptEngineVersion re-baselines the engine without launching', async () => {

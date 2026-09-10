@@ -236,4 +236,28 @@ describe('deriveHardwareProfile', () => {
     }));
     expect(sigs.size).toBeGreaterThanOrEqual(3);
   });
+  // --- engine pin -----------------------------------------------------------
+
+  it('launches unpinned when no engine marker is supplied', () => {
+    // The verify harness calls buildLaunchArgs directly and must keep launching
+    // exactly as before.
+    const o = buildLaunchArgs(profile()) as { browserVersion?: string };
+    expect(o.browserVersion).toBeUndefined();
+  });
+
+  it('pins the engine marker it is given', () => {
+    const o = buildLaunchArgs(profile(), undefined, '145.0.7632.109.2') as { browserVersion?: string };
+    expect(o.browserVersion).toBe('145.0.7632.109.2');
+  });
+
+  it('pins the VERIFIED marker, not the one stored on the locked identity', () => {
+    // Two markers can share a Chromium version and differ in CloakBrowser's
+    // patch revision. Pinning a revision that is not installed makes the
+    // launcher try to download it — measured — so the pin must come from the
+    // engine check, not from the profile record.
+    const locked = lockedWithFp({ hardwareConcurrency: 8, deviceMemory: 8 });
+    locked.resolvedIdentity!.cloakBrowserVersion = '145.0.7632.109.9';
+    const o = buildLaunchArgs(locked, undefined, '145.0.7632.109.2') as { browserVersion?: string };
+    expect(o.browserVersion).toBe('145.0.7632.109.2');
+  });
 });

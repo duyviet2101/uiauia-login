@@ -6,7 +6,7 @@ import { proxyWarnings } from './unlinkability';
 import { profileHealth } from './profile-health';
 import { IdentityService } from './identity-service';
 import type { CreateProfileInput, UpdateProfileInput, ProxyConfig, ProfileRuntime } from './types';
-import { IdentityDriftError, ProxyPreflightError } from './types';
+import { EngineMismatchError, IdentityDriftError, ProxyPreflightError } from './types';
 
 export function registerIpc(
   store: ProfileStore,
@@ -40,6 +40,9 @@ export function registerIpc(
   const rethrowBlocked = (e: unknown): never => {
     if (e instanceof IdentityDriftError) {
       throw new Error(`IDENTITY_DRIFT_BLOCKED:${JSON.stringify(e.drift)}`);
+    }
+    if (e instanceof EngineMismatchError) {
+      throw new Error(`ENGINE_MISMATCH_BLOCKED:${JSON.stringify(e.problems)}`);
     }
     if (e instanceof ProxyPreflightError) {
       throw new Error(`PROXY_PREFLIGHT_BLOCKED:${JSON.stringify({ reason: e.reason, snapshot: e.snapshot })}`);

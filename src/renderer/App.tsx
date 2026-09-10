@@ -140,7 +140,7 @@ export default function App() {
     } catch (e) {
       // Every launch path funnels through here, so the preflight block is
       // translated once rather than in each caller.
-      const blocked = parsePreflightBlock(e);
+      const blocked = parsePreflightBlock(e) ?? parseEngineBlock(e);
       if (blocked) addToast('error', blocked);
       else addToast('error', `${errPrefix}: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
@@ -154,6 +154,20 @@ export default function App() {
    * "open anyway" to offer: the tabs replay by themselves at launch, so the only
    * choices are fix the proxy or remove it from the profile.
    */
+  /** The binary on disk is not the one the app was about to record. */
+  function parseEngineBlock(e: unknown): string | null {
+    const msg = e instanceof Error ? e.message : String(e);
+    const marker = 'ENGINE_MISMATCH_BLOCKED:';
+    const idx = msg.indexOf(marker);
+    if (idx === -1) return null;
+    try {
+      const problems = JSON.parse(msg.slice(idx + marker.length)) as { message: string }[];
+      return `Chưa mở profile — engine không khớp: ${problems.map((p) => p.message).join(' · ')}`;
+    } catch {
+      return 'Chưa mở profile — engine đang chạy không khớp với bản app ghi nhận.';
+    }
+  }
+
   function parsePreflightBlock(e: unknown): string | null {
     const msg = e instanceof Error ? e.message : String(e);
     const marker = 'PROXY_PREFLIGHT_BLOCKED:';
@@ -255,7 +269,7 @@ export default function App() {
     await withBusy(target.id, async () => {
       await api.forceLaunch(target.id);
       await refresh();
-      addToast('success', 'Đã mở và cập nhật IP đã khoá. Phiên bản engine giữ nguyên.');
+      addToast('success', 'Đã mở và cập nhật IP đã khoá. Engine vẫn đúng bản đã khoá — nếu engine đã đổi thì thao tác này bị chặn, không mở âm thầm.');
     }, 'Không mở được');
   }
 

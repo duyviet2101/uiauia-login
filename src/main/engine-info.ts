@@ -35,7 +35,40 @@ export interface EngineInfo {
   installed: boolean;
   /** A pin requested through CLOAKBROWSER_VERSION, if the user set one. */
   requestedVersion: string | null;
+  /** True when the binary was asked and answered. False = we are trusting the
+   *  marker, which is exactly what this module exists to stop doing. */
+  verified: boolean;
   problems: EngineProblem[];
+}
+
+/**
+ * Whether a problem must stop a launch.
+ *
+ * `unreadable` does not: a binary that will not answer `--version` may still be
+ * the right one, and refusing every launch over an exec failure would be a
+ * worse trade than proceeding with the fact recorded. It DOES stop a new
+ * identity from being locked (see BrowserManager.launch) — you cannot baseline
+ * an identity onto an engine you cannot name.
+ */
+export function isBlocking(problem: EngineProblem): boolean {
+  return problem.kind !== 'unreadable';
+}
+
+/** What is actually running, as best as it can be established. */
+export function runningVersion(info: EngineInfo): string {
+  return info.binaryVersion ?? chromiumPartOf(info.markerVersion);
+}
+
+/**
+ * Does the engine running now match the one an identity is locked to?
+ *
+ * Compared on the Chromium part alone: a locked identity stores the package
+ * marker (`145.0.7632.109.2`) while the binary reports only the Chromium
+ * version (`145.0.7632.109`). A string equality here would call every launch a
+ * drift.
+ */
+export function engineMatchesLocked(lockedVersion: string, info: EngineInfo): boolean {
+  return chromiumPartOf(lockedVersion) === runningVersion(info);
 }
 
 /**
@@ -118,6 +151,7 @@ export function describeEngine(
     binaryPath: raw.binaryPath,
     installed,
     requestedVersion,
+    verified: installed && reportedVersion !== null,
     problems,
   };
 }
