@@ -44,7 +44,12 @@ export function ProfileForm({ initial, onSubmit, onCancel }: Props) {
   const editing = !!initial;
   const identityLocked = !!initial?.identityLocked;
   const [name, setName] = useState(initial?.name ?? '');
-  const [platform, setPlatform] = useState<FingerprintPlatform>(initial?.platform ?? 'windows');
+  // New profiles default to the host's own persona. Spoofing Windows from a Mac
+  // was measured to add two detectable contradictions (WebGL extension set vs the
+  // claimed D3D11 renderer, and a Mac-only font stack) without reducing linkage.
+  const hostDefaultPlatform: FingerprintPlatform =
+    typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform) ? 'macos' : 'windows';
+  const [platform, setPlatform] = useState<FingerprintPlatform>(initial?.platform ?? hostDefaultPlatform);
   const [useProxy, setUseProxy] = useState(initial ? !!initial.proxy : true);
   const [proxyType, setProxyType] = useState<'http' | 'socks5'>(initial?.proxy?.type ?? 'http');
   const [host, setHost] = useState(initial?.proxy?.host ?? '');

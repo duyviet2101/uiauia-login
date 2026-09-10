@@ -5,7 +5,8 @@ import { join } from 'path';
 import { EventEmitter } from 'events';
 import { ProfileStore } from '../src/main/store';
 import { BrowserManager } from '../src/main/browser-manager';
-import type { Fingerprint, FingerprintDiagnostics } from '../src/main/types';
+import type { Fingerprint, FingerprintDiagnostics, ProxyTestResult } from '../src/main/types';
+import { ProxyPreflightError } from '../src/main/types';
 import { IdentityService } from '../src/main/identity-service';
 
 function fakeContext(url = 'about:blank') {
@@ -133,11 +134,14 @@ describe('BrowserManager', () => {
     expect(order).toEqual(['prefs', 'launch']);
   });
 
-  it('captures fingerprint on first launch and persists', async () => {
+  it('captures fingerprint on first launch and accepts it as the baseline', async () => {
     const { mgr, store, capture } = await setup();
     await mgr.launch('p1');
     expect(capture).toHaveBeenCalledOnce();
-    expect(store.get('p1')!.fingerprint).toEqual(fakeFp);
+    const p = store.get('p1')!;
+    expect(p.baseline?.fingerprint).toEqual(fakeFp);
+    expect(p.baseline?.source).toBe('first-launch');
+    expect(p.lastObservation?.fingerprint).toEqual(fakeFp);
   });
 
   it('does not run external FingerprintJS visitor probe during normal launch', async () => {
@@ -152,7 +156,8 @@ describe('BrowserManager', () => {
     const store = new ProfileStore(dir, { idGen: () => 'p1', seedGen: () => 9 });
     await store.init();
     await store.create({ name: 'A' });
-    await store.update('p1', { fingerprint: fakeFp, lastOpenedAt: '2026-06-22T00:00:00.000Z' });
+    await store.acceptBaseline('p1', fakeFp, '146', 'first-launch');
+    await store.update('p1', { lastOpenedAt: '2026-06-22T00:00:00.000Z' });
     const ctx = fakeContext('https://example.com/account');
     const mgr = new BrowserManager(store, vi.fn(async () => ctx));
 
@@ -165,7 +170,8 @@ describe('BrowserManager', () => {
     const store = new ProfileStore(dir, { idGen: () => 'p1', seedGen: () => 9 });
     await store.init();
     await store.create({ name: 'A' });
-    await store.update('p1', { fingerprint: fakeFp, lastOpenedAt: '2026-06-22T00:00:00.000Z' });
+    await store.acceptBaseline('p1', fakeFp, '146', 'first-launch');
+    await store.update('p1', { lastOpenedAt: '2026-06-22T00:00:00.000Z' });
     const blank = {
       url: vi.fn(() => 'about:blank'),
       close: vi.fn(async () => {}),
@@ -203,11 +209,20 @@ describe('BrowserManager', () => {
     expect(store.get('p1')!.diagnostics).toEqual(fakeDiagnostics);
   });
 
-  it('skips capture when fingerprint already present', async () => {
+  // Behaviour change: the probe used to run ONLY when the profile had no
+  // fingerprint yet, so after the first launch the app never looked again and
+  // could not have noticed a change if one happened.
+  it('re-reads the fingerprint on every launch, without touching the baseline', async () => {
     const { mgr, store, capture } = await setup();
-    await store.update('p1', { fingerprint: fakeFp });
+    await store.acceptBaseline('p1', fakeFp, '146', 'first-launch');
+    const acceptedAt = store.get('p1')!.baseline!.acceptedAt;
+
     await mgr.launch('p1');
-    expect(capture).not.toHaveBeenCalled();
+
+    expect(capture).toHaveBeenCalledOnce();
+    const p = store.get('p1')!;
+    expect(p.lastObservation?.fingerprint).toEqual(fakeFp);
+    expect(p.baseline!.acceptedAt).toBe(acceptedAt); // baseline untouched
   });
 
   it('context close marks stopped and emits status-changed', async () => {
@@ -252,7 +267,7 @@ describe('BrowserManager', () => {
 
     await mgr.launch('p1'); // auto-lock at 9.9.9.9
     await mgr.stop('p1');
-    const lockedFp = store.get('p1')!.fingerprint;
+    const lockedFp = store.get('p1')!.baseline;
     const lockedSeed = store.get('p1')!.seed;
 
     ip = '5.5.5.5'; // proxy rotated to a different /24
@@ -263,7 +278,65 @@ describe('BrowserManager', () => {
     expect(p.resolvedIdentity?.exitIp).toBe('5.5.5.5');
     expect(p.resolvedIdentity?.webrtcIp).toBe('5.5.5.5');
     expect(p.seed).toBe(lockedSeed);
-    expect(p.fingerprint).toEqual(lockedFp);
+    expect(p.baseline).toEqual(lockedFp);
+  });
+
+  it('forceLaunch keeps the locked engine version unless the caller accepts it', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cloak-'));
+    const store = new ProfileStore(dir, { idGen: () => 'p1', seedGen: () => 9 });
+    await store.init();
+    await store.create({ name: 'A', proxy: { type: 'http', host: 'h', port: 80 } });
+    const ctx = fakeContext();
+    let version = '146';
+    const identity = new IdentityService(
+      { test: vi.fn(async () => ({ ok: true, exitIp: '9.9.9.9' })) } as any,
+      () => version,
+    );
+    const mgr = new BrowserManager(store, vi.fn(async () => ctx), vi.fn(async () => fakeFp), undefined, identity);
+
+    await mgr.launch('p1'); // auto-lock on engine 146
+    await mgr.stop('p1');
+    version = '999'; // the engine was upgraded underneath the profile
+
+    await mgr.forceLaunch('p1');
+    expect(store.get('p1')!.resolvedIdentity?.cloakBrowserVersion).toBe('146');
+    expect(store.get('p1')!.resolvedIdentity?.engineAcceptedAt).toBeUndefined();
+    await mgr.stop('p1');
+
+    await mgr.forceLaunch('p1', { acceptEngine: true });
+    expect(store.get('p1')!.resolvedIdentity?.cloakBrowserVersion).toBe('999');
+    expect(store.get('p1')!.resolvedIdentity?.engineAcceptedAt).toBeTruthy();
+  });
+
+  it('acceptEngineVersion re-baselines the engine without launching', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cloak-'));
+    const store = new ProfileStore(dir, { idGen: () => 'p1', seedGen: () => 9 });
+    await store.init();
+    await store.create({ name: 'A', proxy: { type: 'http', host: 'h', port: 80 } });
+    const ctx = fakeContext();
+    const launcher = vi.fn(async () => ctx);
+    let version = '146';
+    const identity = new IdentityService(
+      { test: vi.fn(async () => ({ ok: true, exitIp: '9.9.9.9' })) } as any,
+      () => version,
+    );
+    const mgr = new BrowserManager(store, launcher, vi.fn(async () => fakeFp), undefined, identity);
+
+    await mgr.launch('p1');
+    await mgr.stop('p1');
+    const launchesBefore = launcher.mock.calls.length;
+    version = '999';
+
+    const accepted = await mgr.acceptEngineVersion('p1');
+    expect(accepted).toBe('999');
+    expect(store.get('p1')!.resolvedIdentity?.cloakBrowserVersion).toBe('999');
+    expect(store.get('p1')!.baseline?.fingerprint).toEqual(fakeFp); // baseline untouched
+    expect(launcher.mock.calls.length).toBe(launchesBefore); // no browser opened
+  });
+
+  it('acceptEngineVersion refuses a profile that is not locked', async () => {
+    const { mgr } = await setup();
+    await expect(mgr.acceptEngineVersion('p1')).rejects.toThrow(/not locked/i);
   });
 
   it('precheckProxy returns tested:false and runs no test for a proxyless profile', async () => {
@@ -309,5 +382,129 @@ describe('BrowserManager', () => {
 
     const result = await mgr.precheckProxy('p1');
     expect(result).toMatchObject({ tested: true, ok: false, error: 'proxy unreachable' });
+  });
+  // -------------------------------------------------------------------------
+  // Preflight: nothing may reach the network before the gate has run.
+  //
+  // buildLaunchArgs passes --restore-last-session, so launchPersistentContext
+  // replays the profile's previous tabs by itself. Any check that runs after it
+  // is not a gate. These tests pin the ordering, not just the outcome.
+  // -------------------------------------------------------------------------
+  async function setupPreflight(proxyResult: ProxyTestResult, opts: { returning?: boolean } = {}) {
+    const dir = mkdtempSync(join(tmpdir(), 'cloak-'));
+    const store = new ProfileStore(dir, { idGen: () => 'p1', seedGen: () => 9 });
+    await store.init();
+    await store.create({ name: 'A', proxy: { type: 'http', host: 'h', port: 80 } });
+    if (opts.returning) await store.update('p1', { lastOpenedAt: new Date().toISOString() });
+    const order: string[] = [];
+    const test = vi.fn(async () => { order.push('proxy-test'); return proxyResult; });
+    const launcher = vi.fn(async () => { order.push('launch'); return fakeContext(); });
+    const identity = new IdentityService({ test } as any, () => '146');
+    const mgr = new BrowserManager(store, launcher, vi.fn(async () => fakeFp), undefined, identity);
+    return { store, mgr, launcher, test, order };
+  }
+
+  it('tests the proxy of an unlocked profile BEFORE opening the browser', async () => {
+    const { mgr, order } = await setupPreflight({ ok: true, exitIp: '9.9.9.9' });
+    await mgr.launch('p1');
+    // Before the fix the proxy was only tested after launch, to decide locking.
+    expect(order).toEqual(['proxy-test', 'launch']);
+  });
+
+  it('blocks a returning profile whose proxy is down, without launching', async () => {
+    const { mgr, launcher } = await setupPreflight({ ok: false, error: 'proxy unreachable' }, { returning: true });
+    await expect(mgr.launch('p1')).rejects.toBeInstanceOf(ProxyPreflightError);
+    // The session would have been restored the moment this ran.
+    expect(launcher).not.toHaveBeenCalled();
+  });
+
+  it('lets a first launch through on a dead proxy — there is no session to replay', async () => {
+    const { mgr, launcher } = await setupPreflight({ ok: false, error: 'proxy unreachable' });
+    await expect(mgr.launch('p1')).resolves.toMatchObject({ launched: true, lockedNow: false });
+    expect(launcher).toHaveBeenCalledOnce();
+  });
+
+  it('blocks a forced launch too — force accepts drift, not an unverified exit', async () => {
+    const { store, mgr, launcher } = await setupPreflight({ ok: false, error: 'proxy unreachable' }, { returning: true });
+    await store.lockIdentity('p1', {
+      lockedAt: 'now', cloakBrowserVersion: '146', seed: 9, platform: 'windows',
+      proxy: { type: 'http', host: 'h', port: 80 }, exitIp: '9.9.9.9', locale: null,
+      timezone: null, webrtcIp: '9.9.9.9', fingerprint: fakeFp, visitorId: null,
+    }, { checkedAt: 'now', ok: true, exitIp: '9.9.9.9' });
+
+    await expect(mgr.forceLaunch('p1')).rejects.toBeInstanceOf(ProxyPreflightError);
+    expect(launcher).not.toHaveBeenCalled();
+  });
+
+  it('reuses a fresh proxy check from the precheck instead of testing twice', async () => {
+    const { mgr, test } = await setupPreflight({ ok: true, exitIp: '9.9.9.9' }, { returning: true });
+    await mgr.precheckProxy('p1');
+    await mgr.launch('p1');
+    expect(test).toHaveBeenCalledOnce();
+  });
+
+  it('re-tests rather than trusting a cached FAILED proxy check', async () => {
+    const { store, mgr, test } = await setupPreflight({ ok: true, exitIp: '9.9.9.9' }, { returning: true });
+    await store.setLastProxyCheck('p1', { checkedAt: new Date().toISOString(), ok: false, error: 'was down' });
+    await mgr.launch('p1');
+    // A failure is not evidence of anything; only a successful check may be reused.
+    expect(test).toHaveBeenCalledOnce();
+  });
+  // -------------------------------------------------------------------------
+  // Baseline vs observation (plan §16.3)
+  // -------------------------------------------------------------------------
+  it('records a differing observation without promoting it to the baseline', async () => {
+    const { store } = await setup();
+    await store.acceptBaseline('p1', fakeFp, '146', 'first-launch');
+    const drifted = { ...fakeFp, webglRenderer: 'Apple M4 Pro' };
+    const ctx = fakeContext();
+    const mgr = new BrowserManager(store, vi.fn(async () => ctx), vi.fn(async () => drifted));
+
+    await mgr.launch('p1');
+
+    const p = store.get('p1')!;
+    expect(p.baseline!.fingerprint).toEqual(fakeFp);          // still the accepted one
+    expect(p.lastObservation!.fingerprint).toEqual(drifted);  // and we can see the difference
+  });
+
+  it('acceptCurrentFingerprint adopts the latest observation, explicitly', async () => {
+    const { store } = await setup();
+    await store.acceptBaseline('p1', fakeFp, '146', 'first-launch');
+    const drifted = { ...fakeFp, webglRenderer: 'Apple M4 Pro' };
+    const mgr = new BrowserManager(store, vi.fn(async () => fakeContext()), vi.fn(async () => drifted));
+    await mgr.launch('p1');
+
+    const accepted = await mgr.acceptCurrentFingerprint('p1');
+    expect(accepted.source).toBe('user-accepted');
+    expect(store.get('p1')!.baseline!.fingerprint).toEqual(drifted);
+  });
+
+  it('refuses to accept a baseline when nothing has been measured', async () => {
+    const { mgr } = await setup();
+    // Writing the old baseline back over itself and reporting success would be
+    // worse than refusing.
+    await expect(mgr.acceptCurrentFingerprint('p1')).rejects.toThrow(/Chưa có lần đo/);
+  });
+
+  it('a failed fingerprint read leaves the previous observation alone', async () => {
+    const { store } = await setup();
+    await store.acceptBaseline('p1', fakeFp, '146', 'first-launch');
+    await store.recordObservation('p1', fakeFp, '146');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const mgr = new BrowserManager(
+      store,
+      vi.fn(async () => fakeContext()),
+      vi.fn(async () => { throw new Error('probe blew up'); }),
+    );
+
+    await expect(mgr.launch('p1')).resolves.toMatchObject({ launched: true });
+
+    // Not overwritten with nothing, and not silently reported as unchanged.
+    const p = store.get('p1')!;
+    expect(p.lastObservation!.fingerprint).toEqual(fakeFp);
+    // The failure is RECORDED, so health can say a check failed rather than
+    // inferring it from an absence.
+    expect(p.lastObservationError?.message).toContain('probe blew up');
+    warn.mockRestore();
   });
 });

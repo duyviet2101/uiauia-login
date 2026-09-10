@@ -1,17 +1,25 @@
 import { useState } from 'react';
-import type { ProfileRuntime, ProxyWarning, ProxyWarningKind } from '../../main/types';
+import type { ProfileRuntime, ProxyWarning, ProxyWarningKind, ProxyWarningLevel } from '../../main/types';
 import { FingerprintPanel } from './FingerprintPanel';
 import { Spinner } from './Spinner';
 import { profileIconForeground } from '../../main/profile-window-customization';
 
 /** Accurate per-cause badge labels (hover shows the full message). */
+// A `low` badge is deliberately unmarked (no ⚠): it is context, not a risk.
 const WARNING_LABELS: Record<ProxyWarningKind, string> = {
   'no-proxy': '⚠ Không proxy',
   'ip-changed': '⚠ IP đã đổi',
-  'ipv6-leak': '⚠ IPv6 lộ',
+  'ipv6-present': 'ⓘ Có IPv6',
+  'ipv6-shared': '⚠ IPv6 dùng chung',
   'dup-exit-ip': '⚠ Trùng IP',
-  'same-asn-geo': '⚠ Cùng ASN/ISP',
+  'same-asn-geo': 'ⓘ Cùng ASN/ISP',
   'dup-proxy-host': '⚠ Trùng proxy',
+};
+
+const WARNING_STYLES: Record<ProxyWarningLevel, string> = {
+  high: 'bg-red-900 text-red-200',
+  medium: 'bg-amber-900 text-amber-200',
+  low: 'bg-slate-700 text-slate-300',
 };
 
 interface Props {
@@ -26,6 +34,7 @@ interface Props {
   onDuplicate: (id: string) => void;
   onRegenerateSeed: (id: string) => void;
   onResetIdentity: (id: string) => void;
+  onAcceptBaseline: (id: string) => void;
   onDelete: (id: string) => void;
 }
 
@@ -36,7 +45,7 @@ function formatLastOpened(iso: string | null): string {
 
 export function ProfileList({
   profiles, warnings, busy,
-  onLaunch, onStop, onTest, onDiagnostics, onEdit, onDuplicate, onRegenerateSeed, onResetIdentity, onDelete,
+  onLaunch, onStop, onTest, onDiagnostics, onEdit, onDuplicate, onRegenerateSeed, onResetIdentity, onAcceptBaseline, onDelete,
 }: Props) {
   const [expanded, setExpanded] = useState<string | null>(null);
 
@@ -101,7 +110,7 @@ export function ProfileList({
                 <span
                   key={i}
                   title={w.message}
-                  className={`rounded px-1.5 py-0.5 text-xs font-medium ${w.level === 'high' ? 'bg-red-900 text-red-200' : 'bg-amber-900 text-amber-200'}`}
+                  className={`rounded px-1.5 py-0.5 text-xs font-medium ${WARNING_STYLES[w.level]}`}
                 >
                   {WARNING_LABELS[w.kind] ?? '⚠ Cảnh báo'}
                 </span>
@@ -202,7 +211,15 @@ export function ProfileList({
 
             {isOpen && (
               <div className="mt-2 pl-5 text-white">
-                <FingerprintPanel fingerprint={p.fingerprint} visitorId={p.visitorId} diagnostics={p.diagnostics} platform={p.platform} />
+                <FingerprintPanel
+                  fingerprint={p.baseline?.fingerprint ?? null}
+                  visitorId={p.visitorId}
+                  diagnostics={p.diagnostics}
+                  platform={p.platform}
+                  health={p.health}
+                  onAcceptBaseline={() => onAcceptBaseline(p.id)}
+                  acceptDisabled={isBusy}
+                />
                 <button
                   onClick={() => (p.identityLocked ? onResetIdentity(p.id) : onRegenerateSeed(p.id))}
                   disabled={isBusy || p.running}

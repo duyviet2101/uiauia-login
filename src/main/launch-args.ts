@@ -59,7 +59,9 @@ export function deriveHardwareProfile(seed: number): HardwareProfile {
  * derives fresh values from its seed.
  */
 function hardwareProfileFor(p: Profile, frozen: Fingerprint | null, seed: number): HardwareProfile {
-  const fp = frozen ?? p.fingerprint;
+  // The BASELINE, never the latest observation: hardware must follow what the
+  // profile is supposed to be, otherwise one odd reading would redefine it.
+  const fp = frozen ?? p.baseline?.fingerprint ?? null;
   if (fp && fp.hardwareConcurrency > 0) {
     return { hardwareConcurrency: fp.hardwareConcurrency, deviceMemory: fp.deviceMemory };
   }

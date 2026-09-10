@@ -6,6 +6,9 @@ interface Props {
   danger?: boolean;
   /** Optional third button shown to the left of cancel (e.g. a safer path). */
   tertiary?: { label: string; onClick: () => void };
+  /** Optional fourth button, next to `tertiary` — for a second distinct choice
+   *  that must not be folded into the first (e.g. accepting a new engine). */
+  secondary?: { label: string; onClick: () => void };
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -17,6 +20,7 @@ export function ConfirmDialog({
   cancelLabel = 'Huỷ',
   danger = false,
   tertiary,
+  secondary,
   onConfirm,
   onCancel,
 }: Props) {
@@ -38,6 +42,14 @@ export function ConfirmDialog({
               className="mr-auto rounded-lg bg-emerald-700 px-4 py-1.5 text-sm font-medium text-white hover:bg-emerald-600 transition-colors"
             >
               {tertiary.label}
+            </button>
+          )}
+          {secondary && (
+            <button
+              onClick={secondary.onClick}
+              className="rounded-lg bg-amber-700 px-4 py-1.5 text-sm font-medium text-white hover:bg-amber-600 transition-colors"
+            >
+              {secondary.label}
             </button>
           )}
           <button

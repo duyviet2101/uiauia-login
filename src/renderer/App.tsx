@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { ProfileRuntime, ProxyWarning, InitState, UpdateStatus, IdentityDrift } from '../main/types';
+import type { EngineInfo } from '../main/engine-info';
 import { api, bridgeReady } from './api';
 import { ProfileList } from './components/ProfileList';
 import { ProfileForm, type ProfileFormValues } from './components/ProfileForm';
@@ -18,6 +19,7 @@ export default function App() {
   );
   const [profiles, setProfiles] = useState<ProfileRuntime[]>([]);
   const [warnings, setWarnings] = useState<ProxyWarning[]>([]);
+  const [engine, setEngine] = useState<EngineInfo | null>(null);
   const [busy, setBusy] = useState<Set<string>>(new Set());
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<ProfileRuntime | null>(null);
@@ -70,6 +72,7 @@ export default function App() {
     if (init.phase !== 'ready') return;
     refresh().catch((e) => addToast('error', String(e instanceof Error ? e.message : e)));
     api.getVersion().then(setVersion).catch(() => {});
+    api.engineInfo().then(setEngine).catch(() => {});
     const unsub = api.onStatusChanged(({ id, running }) => {
       setProfiles((prev) => prev.map((p) => (p.id === id ? { ...p, running } : p)));
     });
@@ -135,10 +138,34 @@ export default function App() {
     try {
       await fn();
     } catch (e) {
-      addToast('error', `${errPrefix}: ${e instanceof Error ? e.message : String(e)}`);
+      // Every launch path funnels through here, so the preflight block is
+      // translated once rather than in each caller.
+      const blocked = parsePreflightBlock(e);
+      if (blocked) addToast('error', blocked);
+      else addToast('error', `${errPrefix}: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setBusyFor(id, false);
     }
+  }
+
+  /**
+   * A launch stopped before Chromium started, because the profile would have
+   * restored its previous session over a proxy that did not answer. There is no
+   * "open anyway" to offer: the tabs replay by themselves at launch, so the only
+   * choices are fix the proxy or remove it from the profile.
+   */
+  function parsePreflightBlock(e: unknown): string | null {
+    const msg = e instanceof Error ? e.message : String(e);
+    const marker = 'PROXY_PREFLIGHT_BLOCKED:';
+    const idx = msg.indexOf(marker);
+    if (idx === -1) return null;
+    let reason = 'proxy không phản hồi';
+    try {
+      const parsed = JSON.parse(msg.slice(idx + marker.length)) as { reason?: string };
+      if (parsed.reason) reason = parsed.reason;
+    } catch { /* keep the generic reason */ }
+    return `Chưa mở profile: ${reason}. Profile này có phiên cũ sẽ tự khôi phục khi mở, `
+      + 'nên phải xác minh proxy trước. Sửa proxy rồi thử lại, hoặc bỏ proxy khỏi profile.';
   }
 
   function parseIdentityDriftError(e: unknown): IdentityDrift[] | null {
@@ -180,6 +207,14 @@ export default function App() {
       throw e;
     }
   }, 'Không mở được');
+  /** Adopt the latest reading as the profile's baseline. Explicit only — the
+   *  app never does this on its own when a fingerprint changes. */
+  const handleAcceptBaseline = (id: string) =>
+    withBusy(id, async () => {
+      const baseline = await api.acceptBaseline(id);
+      await refresh();
+      addToast('success', `Đã ghi baseline mới (engine ${baseline.engineVersion}).`);
+    }, 'Không ghi được baseline');
   const handleStop = (id: string) => withBusy(id, async () => { await api.stop(id); await refresh(); }, 'Không dừng được');
   const handleTest = (id: string) =>
     withBusy(id, async () => { await api.openUrl(id, TEST_FP_URL); addToast('info', 'Đã mở trang kiểm tra fingerprint.'); }, 'Không mở trang test được');
@@ -220,7 +255,19 @@ export default function App() {
     await withBusy(target.id, async () => {
       await api.forceLaunch(target.id);
       await refresh();
-      addToast('success', 'Đã mở và cập nhật IP/identity đã khoá theo môi trường hiện tại.');
+      addToast('success', 'Đã mở và cập nhật IP đã khoá. Phiên bản engine giữ nguyên.');
+    }, 'Không mở được');
+  }
+
+  /** Explicit, separate decision from accepting a rotated IP: re-baseline the
+   *  locked identity onto the engine that is installed now, then open. */
+  async function forceLaunchAcceptingEngine(target: ProfileRuntime | null) {
+    if (!target) return;
+    setPendingIdentityDrift(null);
+    await withBusy(target.id, async () => {
+      await api.forceLaunch(target.id, { acceptEngine: true });
+      await refresh();
+      addToast('success', 'Đã chấp nhận engine mới cho identity đã khoá và mở profile.');
     }, 'Không mở được');
   }
 
@@ -244,6 +291,20 @@ export default function App() {
   return (
     <div className="min-h-screen bg-slate-900 text-white">
       <div className="mx-auto max-w-2xl space-y-6 p-6">
+        {/* Shown only when the binary on disk disagrees with the version the app
+            records against locked identities. Silence here means verified, not
+            unchecked. */}
+        {engine && engine.problems.length > 0 && (
+          <div className="rounded-lg border border-amber-700/60 bg-amber-950/40 p-3 text-xs text-amber-200">
+            <div className="font-medium">Engine chưa khớp</div>
+            <ul className="mt-1 list-disc space-y-0.5 pl-4">
+              {engine.problems.map((problem) => <li key={problem.kind}>{problem.message}</li>)}
+            </ul>
+            <p className="mt-1 text-[11px] text-amber-300/80">
+              App <span className="font-mono">không</span> tự tải hay đổi engine. Xem docs/TECHNICAL.md §6.2.
+            </p>
+          </div>
+        )}
         <header className="flex items-center justify-between">
           <div>
             <h1 className="text-xl font-bold tracking-tight">
@@ -283,6 +344,7 @@ export default function App() {
           onDuplicate={handleDuplicate}
           onRegenerateSeed={(id) => setPendingReseed(profiles.find((p) => p.id === id) ?? null)}
           onResetIdentity={(id) => setPendingIdentityReset(profiles.find((p) => p.id === id) ?? null)}
+          onAcceptBaseline={handleAcceptBaseline}
           onDelete={(id) => setPendingDelete(profiles.find((p) => p.id === id) ?? null)}
         />
       </div>
@@ -328,20 +390,32 @@ export default function App() {
         />
       )}
 
-      {pendingIdentityDrift && (
-        <ConfirmDialog
-          title="Identity drift blocked"
-          message={`Không mở “${pendingIdentityDrift.profile.name}” vì identity đã khoá bị lệch: ${pendingIdentityDrift.drift.map((d) => `${d.field} expected ${d.expected ?? 'null'} got ${d.actual ?? 'null'}`).join('; ')}.
-
-• “Mở & cập nhật IP”: giữ nguyên seed/fingerprint/cookie, chỉ cập nhật IP/phiên bản đã khoá theo hiện tại (dùng khi proxy chỉ đổi IP).
-• “Reset identity”: xoá fingerprint đã khoá và tạo danh tính mới (chỉ dùng khi thực sự muốn đổi thiết bị).`}
-          confirmLabel="Reset identity"
-          danger
-          tertiary={{ label: 'Mở & cập nhật IP', onClick: () => forceLaunchAcceptingIp(pendingIdentityDrift.profile) }}
-          onConfirm={() => confirmResetIdentity(pendingIdentityDrift.profile)}
-          onCancel={() => setPendingIdentityDrift(null)}
-        />
-      )}
+      {pendingIdentityDrift && (() => {
+        const engineDrift = pendingIdentityDrift.drift.find((d) => d.field === 'cloakBrowserVersion');
+        const lines = [
+          `Không mở “${pendingIdentityDrift.profile.name}” vì identity đã khoá bị lệch: ${pendingIdentityDrift.drift.map((d) => `${d.field} expected ${d.expected ?? 'null'} got ${d.actual ?? 'null'}`).join('; ')}.`,
+          '',
+          '• “Mở & cập nhật IP”: giữ nguyên seed/fingerprint/cookie và GIỮ NGUYÊN phiên bản engine đã khoá, chỉ cập nhật IP (dùng khi proxy chỉ đổi IP).',
+        ];
+        if (engineDrift) {
+          lines.push(
+            `• “Chấp nhận engine mới”: identity đang khoá ở engine ${engineDrift.expected ?? 'n/a'} nhưng máy đang chạy ${engineDrift.actual ?? 'n/a'}. Đổi engine làm đổi fingerprint mà site nhìn thấy, nên đây là quyết định riêng — chỉ chọn khi bạn chủ động muốn nâng.`,
+          );
+        }
+        lines.push('• “Reset identity”: xoá fingerprint đã khoá và tạo danh tính mới (chỉ dùng khi thực sự muốn đổi thiết bị).');
+        return (
+          <ConfirmDialog
+            title="Identity drift blocked"
+            message={lines.join('\n')}
+            confirmLabel="Reset identity"
+            danger
+            tertiary={{ label: 'Mở & cập nhật IP', onClick: () => forceLaunchAcceptingIp(pendingIdentityDrift.profile) }}
+            secondary={engineDrift ? { label: 'Chấp nhận engine mới', onClick: () => forceLaunchAcceptingEngine(pendingIdentityDrift.profile) } : undefined}
+            onConfirm={() => confirmResetIdentity(pendingIdentityDrift.profile)}
+            onCancel={() => setPendingIdentityDrift(null)}
+          />
+        );
+      })()}
 
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </div>

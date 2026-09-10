@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { mkdtempSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { ProfileStore } from '../src/main/store';
+import { ProfileStore, defaultPlatformFor } from '../src/main/store';
 import type { Fingerprint, ResolvedIdentity } from '../src/main/types';
 
 async function makeStore() {
@@ -72,13 +72,12 @@ describe('ProfileStore', () => {
     expect(b.windowCustomization.color).not.toBe(a.windowCustomization.color);
   });
 
-  it('regenerateSeed assigns new seed and clears cached fingerprint/visitorId', async () => {
+  it('regenerateSeed assigns new seed and clears baseline/observation/visitorId', async () => {
     const store = await makeStore();
     const p = await store.create({ name: 'A' });
+    await store.acceptBaseline(p.id, fakeFp, '146', 'first-launch');
+    await store.recordObservation(p.id, fakeFp, '146');
     await store.update(p.id, {
-      fingerprint: {
-        ...fakeFp,
-      },
       visitorId: 'abc',
       diagnostics: {
         capturedAt: 'now',
@@ -96,7 +95,8 @@ describe('ProfileStore', () => {
     const before = store.get(p.id)!.seed;
     const after = await store.regenerateSeed(p.id);
     expect(after.seed).not.toBe(before);
-    expect(after.fingerprint).toBeNull();
+    expect(after.baseline).toBeNull();
+    expect(after.lastObservation).toBeNull();
     expect(after.visitorId).toBeNull();
     expect(after.diagnostics).toBeNull();
   });
@@ -104,10 +104,36 @@ describe('ProfileStore', () => {
   it('create applies platform/startUrl defaults', async () => {
     const store = await makeStore();
     const p = await store.create({ name: 'A' });
-    expect(p.platform).toBe('windows');
+    // A new profile takes the host's own persona (see defaultPlatformFor).
+    expect(p.platform).toBe(defaultPlatformFor());
     expect(p.startUrl).toBeNull();
     expect(p.visitorId).toBeNull();
     expect(p.diagnostics).toBeNull();
+  });
+
+  it('defaultPlatformFor picks the native persona per host OS', () => {
+    // Spoofing Windows from a Mac was measured to add two detectable
+    // contradictions without reducing cross-profile linkage.
+    expect(defaultPlatformFor('darwin')).toBe('macos');
+    expect(defaultPlatformFor('win32')).toBe('windows');
+    expect(defaultPlatformFor('linux')).toBe('windows');
+  });
+
+  it('an explicit platform always wins over the host default', async () => {
+    const store = await makeStore();
+    const p = await store.create({ name: 'A', platform: 'windows' });
+    expect(p.platform).toBe('windows');
+  });
+
+  it('migration leaves an existing profile persona untouched', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'store-persona-'));
+    writeFileSync(
+      join(dir, 'cloak.json'),
+      JSON.stringify({ profiles: [{ id: 'old', name: 'old', seed: 1, platform: 'windows', createdAt: '2026-01-01T00:00:00.000Z' }] }),
+    );
+    const store = new ProfileStore(dir, { defaultPlatform: 'macos' });
+    await store.init();
+    expect(store.get('old')?.platform).toBe('windows');
   });
 
   it('create defaults blockGeolocation on and doNotTrack off', async () => {
@@ -159,7 +185,8 @@ describe('ProfileStore', () => {
     const reset = await store.resetIdentity(p.id);
     expect(reset.identityLocked).toBe(false);
     expect(reset.resolvedIdentity).toBeNull();
-    expect(reset.fingerprint).toBeNull();
+    expect(reset.baseline).toBeNull();
+    expect(reset.lastObservation).toBeNull();
     expect(reset.visitorId).toBeNull();
     expect(reset.diagnostics).toBeNull();
     expect(reset.userDataDir).toContain(p.id);
@@ -170,13 +197,13 @@ describe('ProfileStore', () => {
     const p = await store.create({ name: 'A', proxy: { type: 'http', host: 'h', port: 80 } });
     await store.lockIdentity(p.id, identity(p.seed));
     const seedBefore = store.get(p.id)!.seed;
-    const fpBefore = store.get(p.id)!.fingerprint;
+    const fpBefore = store.get(p.id)!.baseline;
     const out = await store.reconcileLockedIdentity(p.id, { exitIp: '5.5.5.5', webrtcIp: '5.5.5.5', cloakBrowserVersion: '200' });
     expect(out.resolvedIdentity!.exitIp).toBe('5.5.5.5');
     expect(out.resolvedIdentity!.cloakBrowserVersion).toBe('200');
     expect(out.identityLocked).toBe(true);
     expect(out.seed).toBe(seedBefore);
-    expect(out.fingerprint).toEqual(fpBefore);
+    expect(out.baseline).toEqual(fpBefore);
   });
 
   it('reconcileLockedIdentity throws when profile is not locked', async () => {
@@ -278,5 +305,106 @@ describe('ProfileStore', () => {
     const store = new ProfileStore(dir);
     await store.init();
     expect(store.get('legacy')!.diagnostics!.nonStandardFonts).toEqual([]);
+  });
+  // ---------------------------------------------------------------------------
+  // v7 -> v8: one `fingerprint` field became an accepted baseline plus a latest
+  // observation. The migration must not invent an observation it never made.
+  // ---------------------------------------------------------------------------
+  it('migrates a v7 fingerprint into an accepted baseline, with no observation', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cloak-v8-'));
+    writeFileSync(join(dir, 'cloak.json'), JSON.stringify({
+      version: 7,
+      profiles: [{
+        id: 'old', name: 'old', seed: 4242042, platform: 'macos', proxy: null, geoip: true,
+        timezone: null, locale: null, startUrl: null, userDataDir: join(dir, 'profiles', 'old'),
+        fingerprint: fakeFp, visitorId: null, diagnostics: null, identityLocked: false,
+        resolvedIdentity: null, lastProxyCheck: null, blockGeolocation: true, doNotTrack: false,
+        createdAt: '2026-01-01T00:00:00.000Z', lastOpenedAt: '2026-02-01T00:00:00.000Z',
+      }],
+    }));
+    const store = new ProfileStore(dir, { defaultPlatform: 'windows' });
+    await store.init();
+    const p = store.get('old')!;
+
+    expect(p.baseline?.fingerprint).toEqual(fakeFp);
+    expect(p.baseline?.source).toBe('first-launch');
+    // The shape it came FROM, not the shape it is being read into.
+    expect(p.baseline?.schemaVersion).toBe(7);
+    // Nobody recorded which engine produced it, and pretending otherwise would
+    // make the next comparison silently wrong.
+    expect(p.baseline?.engineVersion).toBe('unknown');
+    // No reading was ever taken after the baseline, so there is no observation.
+    expect(p.lastObservation).toBeNull();
+    // The point of the migration test: identity fields survive untouched.
+    expect(p.seed).toBe(4242042);
+    expect(p.platform).toBe('macos');
+    expect((p as unknown as Record<string, unknown>).fingerprint).toBeUndefined();
+  });
+
+  it('migrates a v7 profile with no fingerprint to a null baseline, not an empty one', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cloak-v8-empty-'));
+    writeFileSync(join(dir, 'cloak.json'), JSON.stringify({
+      version: 7,
+      profiles: [{
+        id: 'fresh', name: 'fresh', seed: 7, platform: 'windows', proxy: null, geoip: true,
+        timezone: null, locale: null, startUrl: null, userDataDir: join(dir, 'profiles', 'fresh'),
+        fingerprint: null, visitorId: null, diagnostics: null, identityLocked: false,
+        resolvedIdentity: null, lastProxyCheck: null, blockGeolocation: true, doNotTrack: false,
+        createdAt: '2026-01-01T00:00:00.000Z', lastOpenedAt: null,
+      }],
+    }));
+    const store = new ProfileStore(dir);
+    await store.init();
+    expect(store.get('fresh')!.baseline).toBeNull();
+  });
+
+  it('recordObservation never touches the baseline', async () => {
+    const store = await makeStore();
+    const p = await store.create({ name: 'A' });
+    await store.acceptBaseline(p.id, fakeFp, '146', 'first-launch');
+
+    const drifted = { ...fakeFp, userAgent: 'something else', capturedAt: 'later' };
+    await store.recordObservation(p.id, drifted, '151');
+
+    const after = store.get(p.id)!;
+    expect(after.baseline!.fingerprint).toEqual(fakeFp);   // unchanged
+    expect(after.baseline!.engineVersion).toBe('146');     // unchanged
+    expect(after.lastObservation!.fingerprint).toEqual(drifted);
+    expect(after.lastObservation!.engineVersion).toBe('151');
+  });
+
+  it('refuses an automatic first-launch baseline when one already exists', async () => {
+    const store = await makeStore();
+    const p = await store.create({ name: 'A' });
+    await store.acceptBaseline(p.id, fakeFp, '146', 'first-launch');
+    await expect(store.acceptBaseline(p.id, fakeFp, '151', 'first-launch'))
+      .rejects.toThrow(/already has an accepted baseline/i);
+    // An explicit user acceptance is allowed to replace it.
+    const next = await store.acceptBaseline(p.id, fakeFp, '151', 'user-accepted');
+    expect(next.engineVersion).toBe('151');
+    expect(store.get(p.id)!.baseline!.source).toBe('user-accepted');
+  });
+  it('records the true prior schema version on a baseline promoted from very old data', async () => {
+    // The user's own store was still at v2. Stamping "7" on it would have been a
+    // guess dressed up as a record.
+    const dir = mkdtempSync(join(tmpdir(), 'cloak-v2-'));
+    writeFileSync(join(dir, 'cloak.json'), JSON.stringify({
+      version: 2,
+      profiles: [{
+        id: 'ancient', name: 'ancient', seed: 12345678, platform: 'windows',
+        proxy: null, geoip: true, timezone: null, locale: null,
+        userDataDir: join(dir, 'profiles', 'ancient'), fingerprint: fakeFp,
+        createdAt: '2026-06-17T16:13:51.361Z', lastOpenedAt: null,
+      }],
+    }));
+    const store = new ProfileStore(dir, { defaultPlatform: 'macos' });
+    await store.init();
+    const p = store.get('ancient')!;
+    expect(p.baseline?.schemaVersion).toBe(2);
+    expect(p.baseline?.fingerprint).toEqual(fakeFp);
+    expect(p.lastObservation).toBeNull();
+    // A Mac host default must not re-persona an existing Windows profile.
+    expect(p.platform).toBe('windows');
+    expect(p.seed).toBe(12345678);
   });
 });

@@ -11,8 +11,8 @@ import type {
 function profile(over: Partial<Profile> = {}): Profile {
   return {
     id: 'p1', name: 'Account', seed: 1, platform: 'windows', proxy: null, geoip: true,
-    timezone: null, locale: null, startUrl: null, userDataDir: '/tmp/p1', fingerprint: null,
-    visitorId: null, diagnostics: null, identityLocked: false, resolvedIdentity: null,
+    timezone: null, locale: null, startUrl: null, userDataDir: '/tmp/p1', baseline: null,
+    lastObservation: null, lastObservationError: null, visitorId: null, diagnostics: null, identityLocked: false, resolvedIdentity: null,
     lastProxyCheck: null, blockGeolocation: true, doNotTrack: false,
     windowCustomization: { enabled: true, number: 12, color: '#2563EB' },
     createdAt: '', lastOpenedAt: null, ...over,

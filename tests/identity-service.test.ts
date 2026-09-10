@@ -38,7 +38,8 @@ function profile(over: Partial<Profile> = {}): Profile {
     locale: 'en-US',
     startUrl: null,
     userDataDir: '/tmp/p1',
-    fingerprint: fp,
+    baseline: { fingerprint: fp, acceptedAt: 'now', engineVersion: '146', schemaVersion: 8, source: 'identity-lock' },
+    lastObservation: null, lastObservationError: null,
     visitorId: 'vid',
     diagnostics: null,
     identityLocked: true,
@@ -111,16 +112,41 @@ describe('IdentityService', () => {
     expect(result.fromCache).toBe(false);
   });
 
-  it('reconcilePatch refreshes version and proxy-derived fields only', () => {
+  it('reconcilePatch refreshes proxy-derived fields only', () => {
     const patch = service({ ok: true }, '999').reconcilePatch({
       checkedAt: 'now', ok: true, exitIp: '1.2.3.4', country: 'VN', timezone: 'Asia/Ho_Chi_Minh',
     });
-    expect(patch.cloakBrowserVersion).toBe('999');
     expect(patch.exitIp).toBe('1.2.3.4');
     expect(patch.webrtcIp).toBe('1.2.3.4');
     expect(patch.exitCountry).toBe('VN');
     expect(patch.seed).toBeUndefined();
     expect(patch.fingerprint).toBeUndefined();
+  });
+
+  it('reconcilePatch never re-baselines the engine version', () => {
+    // Accepting a rotated proxy IP must not silently accept a browser upgrade:
+    // the upgrade changes the fingerprint a site sees, the IP rotation does not.
+    const patch = service({ ok: true }, '999').reconcilePatch({
+      checkedAt: 'now', ok: true, exitIp: '1.2.3.4',
+    });
+    expect(patch.cloakBrowserVersion).toBeUndefined();
+    expect(patch.engineAcceptedAt).toBeUndefined();
+  });
+
+  it('reconcilePatch is empty when there is no usable snapshot', () => {
+    expect(service({ ok: true }, '999').reconcilePatch(undefined)).toEqual({});
+    expect(service({ ok: true }, '999').reconcilePatch({ checkedAt: 'now', ok: false })).toEqual({});
+  });
+
+  it('enginePatch is the only thing that moves the engine version', () => {
+    const patch = service({ ok: true }, '999').enginePatch();
+    expect(patch.cloakBrowserVersion).toBe('999');
+    expect(patch.engineAcceptedAt).toBeTruthy();
+    expect(patch.exitIp).toBeUndefined();
+  });
+
+  it('currentEngineVersion reports the installed engine', () => {
+    expect(service({ ok: true }, '999').currentEngineVersion()).toBe('999');
   });
 
   it('builds resolved identity from launch fingerprint and proxy snapshot', () => {

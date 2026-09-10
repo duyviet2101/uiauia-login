@@ -7,9 +7,20 @@ type VersionProvider = () => string;
 
 const currentVersion: VersionProvider = () => binaryInfo().version;
 
-/** Reuse a recent proxy check instead of launching a throwaway browser on
- *  every locked open. */
-const PROXY_CHECK_TTL_MS = 10 * 60 * 1000;
+/**
+ * How long a proxy check may stand in for a fresh one.
+ *
+ * This is a HANDOFF window, not a cache. Its only job is to stop the
+ * precheck -> confirm -> launch sequence of a single user action from testing
+ * the same proxy twice in a row, which costs a throwaway browser each time.
+ *
+ * It used to be 10 minutes, which turned it into a cache: a rotating
+ * residential proxy can hand out a different exit IP several times inside that
+ * window, so a launch could be admitted against an exit that no longer existed
+ * — and admitted is not a soft state here, because the launch immediately
+ * replays the profile's previous session (see BrowserManager.preflight).
+ */
+const PROXY_CHECK_TTL_MS = 90 * 1000;
 
 function norm(v: string | null | undefined): string | null {
   return v == null || v === '' ? null : v;
@@ -78,7 +89,7 @@ export class IdentityService {
     let fromCache = false;
     if (profile.proxy) {
       const cached = profile.lastProxyCheck;
-      if (cached && cached.ok && cached.exitIp && this.isFresh(cached)) {
+      if (this.isSnapshotUsable(cached)) {
         snapshot = cached;
         fromCache = true;
       } else {
@@ -96,18 +107,34 @@ export class IdentityService {
     return { ok: drift.length === 0, drift, snapshot, fromCache };
   }
 
-  private isFresh(snap: ProxyCheckSnapshot): boolean {
+  /**
+   * True when `snap` is recent enough to stand in for a fresh test. Public so
+   * the launch path applies exactly the same rule the locked check does — two
+   * different freshness definitions would be a hole waiting to be found.
+   */
+  isSnapshotFresh(snap: ProxyCheckSnapshot): boolean {
     const t = Date.parse(snap.checkedAt);
     return Number.isFinite(t) && Date.now() - t < PROXY_CHECK_TTL_MS;
   }
 
+  /** A snapshot that may be reused as evidence: fresh, successful, and with an
+   *  exit IP actually resolved. Anything else must be re-tested. */
+  isSnapshotUsable(snap: ProxyCheckSnapshot | null | undefined): snap is ProxyCheckSnapshot {
+    return !!snap && snap.ok && !!snap.exitIp && this.isSnapshotFresh(snap);
+  }
+
   /**
-   * Patch that re-aligns a locked identity with the current environment, used
-   * by "open and accept new IP". Keeps seed/platform/fingerprint/cookies; only
-   * refreshes the binary version and proxy-derived fields.
+   * Patch for "open and accept the new IP": proxy-derived fields ONLY.
+   *
+   * It deliberately does NOT touch `cloakBrowserVersion`. Accepting a rotated
+   * proxy IP and accepting a new browser engine are different decisions with
+   * different risk — a browser upgrade changes the fingerprint a site sees,
+   * while an IP rotation does not. Folding the engine version in here meant one
+   * click silently re-baselined the identity onto whatever binary happened to be
+   * installed. Use `enginePatch()` for that, only when the user asks for it.
    */
   reconcilePatch(snapshot?: ProxyCheckSnapshot): Partial<ResolvedIdentity> {
-    const patch: Partial<ResolvedIdentity> = { cloakBrowserVersion: this.versionProvider() };
+    const patch: Partial<ResolvedIdentity> = {};
     if (snapshot?.ok && snapshot.exitIp) {
       patch.exitIp = snapshot.exitIp;
       patch.webrtcIp = snapshot.exitIp;
@@ -115,6 +142,18 @@ export class IdentityService {
       if (snapshot.timezone) patch.exitTimezone = snapshot.timezone;
     }
     return patch;
+  }
+
+  /** The engine version currently installed — what a locked identity would be
+   *  re-baselined to if the user accepts an engine change. */
+  currentEngineVersion(): string {
+    return this.versionProvider();
+  }
+
+  /** Explicit, user-driven acceptance of a new engine version. Separate from
+   *  `reconcilePatch` on purpose; never applied automatically. */
+  enginePatch(): Partial<ResolvedIdentity> {
+    return { cloakBrowserVersion: this.versionProvider(), engineAcceptedAt: new Date().toISOString() };
   }
 
   async checkProxy(proxy: ProxyConfig): Promise<ProxyCheckSnapshot> {

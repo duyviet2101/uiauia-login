@@ -2,11 +2,16 @@ import { describe, it, expect } from 'vitest';
 import { toProxyUrl, buildLaunchArgs, deriveHardwareProfile } from '../src/main/launch-args';
 import type { Profile, Fingerprint, ResolvedIdentity } from '../src/main/types';
 
+/** An accepted baseline wrapping `fp` — the shape launch args now read from. */
+function baselineOf(fp: Fingerprint) {
+  return { fingerprint: fp, acceptedAt: 'now', engineVersion: '146', schemaVersion: 8, source: 'first-launch' as const };
+}
+
 function profile(over: Partial<Profile> = {}): Profile {
   return {
     id: 'p1', name: 'A', seed: 12345, platform: 'windows', proxy: null, geoip: true,
     timezone: null, locale: null, startUrl: null, userDataDir: '/data/p1',
-    fingerprint: null, visitorId: null, diagnostics: null, identityLocked: false, resolvedIdentity: null, lastProxyCheck: null,
+    baseline: null, lastObservation: null, lastObservationError: null, visitorId: null, diagnostics: null, identityLocked: false, resolvedIdentity: null, lastProxyCheck: null,
     blockGeolocation: true, doNotTrack: false,
     windowCustomization: { enabled: true, number: 1, color: '#2563EB' },
     createdAt: '', lastOpenedAt: null, ...over,
@@ -115,7 +120,7 @@ describe('buildLaunchArgs', () => {
 
   it('screen comes from the real display; viewport is null so the user controls the window', () => {
     const display = { width: 1366, height: 768 };
-    const o = buildLaunchArgs(profile({ seed: 4242042, fingerprint: null }), display);
+    const o = buildLaunchArgs(profile({ seed: 4242042 }), display);
     expect(flag(o.args, '--fingerprint-screen-width')).toBe('1366');
     expect(flag(o.args, '--fingerprint-screen-height')).toBe('768');
     // A forced viewport applies a CDP device-metrics override that fights manual
@@ -126,8 +131,8 @@ describe('buildLaunchArgs', () => {
 
   it('screen is constant across seeds for the same display', () => {
     const display = { width: 2560, height: 1440 };
-    const a = buildLaunchArgs(profile({ seed: 111, fingerprint: null }), display);
-    const b = buildLaunchArgs(profile({ seed: 999999, fingerprint: null }), display);
+    const a = buildLaunchArgs(profile({ seed: 111 }), display);
+    const b = buildLaunchArgs(profile({ seed: 999999 }), display);
     expect(flag(a.args, '--fingerprint-screen-width')).toBe('2560');
     expect(flag(b.args, '--fingerprint-screen-width')).toBe(flag(a.args, '--fingerprint-screen-width'));
   });
@@ -145,14 +150,14 @@ describe('buildLaunchArgs', () => {
   it('unlocked: emits cores/memory flags derived from the seed', () => {
     const seed = 4242042;
     const hw = deriveHardwareProfile(seed);
-    const o = buildLaunchArgs(profile({ seed, fingerprint: null }));
+    const o = buildLaunchArgs(profile({ seed }));
     expect(flag(o.args, '--fingerprint-hardware-concurrency')).toBe(String(hw.hardwareConcurrency));
     expect(flag(o.args, '--fingerprint-device-memory')).toBe(String(hw.deviceMemory));
   });
 
   it('unlocked: cores/memory vary across seeds so profiles are not linkable by device', () => {
     const seeds = [11, 2222, 30303, 444444, 5, 67890, 9090909, 13, 808080, 1234567, 24680, 99999999];
-    const sigs = new Set(seeds.map((s) => hwSig(buildLaunchArgs(profile({ seed: s, fingerprint: null })))));
+    const sigs = new Set(seeds.map((s) => hwSig(buildLaunchArgs(profile({ seed: s })))));
     expect(sigs.size).toBeGreaterThanOrEqual(3);
   });
 
@@ -175,7 +180,7 @@ describe('buildLaunchArgs', () => {
 
   it('unlocked but already probed: reuse the probed cores/memory, do not change identity', () => {
     const probed: Fingerprint = { ...baseFp, hardwareConcurrency: 4, deviceMemory: 4 };
-    const o = buildLaunchArgs(profile({ seed: 555, fingerprint: probed }));
+    const o = buildLaunchArgs(profile({ seed: 555, baseline: baselineOf(probed) }));
     expect(flag(o.args, '--fingerprint-hardware-concurrency')).toBe('4');
     expect(flag(o.args, '--fingerprint-device-memory')).toBe('4');
   });

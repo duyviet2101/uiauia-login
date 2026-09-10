@@ -8,6 +8,8 @@ import { registerIpc } from './ipc';
 import { IdentityService } from './identity-service';
 import { clearQuarantine } from './quarantine';
 import type { InitState } from './types';
+import { readEngineInfo } from './engine-info';
+import type { EngineInfo } from './engine-info';
 import { UpdateService, NullUpdater } from './update-service';
 import { MacUpdater } from './mac-updater';
 import { WinUpdater, resolveElectronAutoUpdater } from './win-updater';
@@ -17,6 +19,7 @@ import { NullProfileWindowService } from './profile-window-service';
 import { ProfileIconCache } from './profile-icon';
 
 let initState: InitState = { phase: 'starting', message: 'Đang khởi động…' };
+let engineInfo: EngineInfo | null = null;
 
 function setInitState(next: InitState): void {
   initState = next;
@@ -85,6 +88,7 @@ app.whenReady().then(async () => {
   // even if it missed an earlier broadcast.
   ipcMain.handle('app:get-init-state', () => initState);
   ipcMain.handle('app:get-version', () => app.getVersion());
+  ipcMain.handle('app:engine-info', () => engineInfo);
   ipcMain.handle('app:open-external', (_e, url: string) => shell.openExternal(url));
 
   try {
@@ -96,6 +100,18 @@ app.whenReady().then(async () => {
       await clearQuarantine(info.binaryPath);
     } catch {
       /* best-effort */
+    }
+
+    // Ask the binary on disk what it actually is, rather than trusting the
+    // version the package resolved. A locked identity is pinned to that number,
+    // so a silent disagreement makes the pin meaningless. Never blocks startup:
+    // the finding is reported, not acted on.
+    try {
+      engineInfo = await readEngineInfo();
+      console.log(`[engine] marker ${engineInfo.markerVersion} · binary ${engineInfo.binaryVersion ?? 'không trả lời'} · tier ${engineInfo.tier}`);
+      for (const problem of engineInfo.problems) console.warn(`[engine] ${problem.kind}: ${problem.message}`);
+    } catch (error) {
+      console.warn('[engine] Could not verify the engine version:', error);
     }
 
     setInitState({ phase: 'starting-services', message: 'Đang khởi tạo dịch vụ…' });

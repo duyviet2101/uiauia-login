@@ -11,7 +11,9 @@ import type {
   IdentityPreflightResult,
   FingerprintDiagnostics,
   ProxyPrecheckResult,
+  FingerprintBaseline,
 } from '../main/types';
+import type { EngineInfo } from '../main/engine-info';
 
 const bridge = typeof window !== 'undefined' ? window.api : undefined;
 
@@ -49,7 +51,11 @@ export const api = {
   preflightIdentity: (id: string): Promise<IdentityPreflightResult> => need().preflightIdentity(id),
   precheckProxy: (id: string): Promise<ProxyPrecheckResult> => need().precheckProxy(id),
   launch: (id: string): Promise<LaunchResult> => need().launch(id),
-  forceLaunch: (id: string): Promise<LaunchResult> => need().forceLaunch(id),
+  forceLaunch: (id: string, opts?: { acceptEngine?: boolean }): Promise<LaunchResult> =>
+    need().forceLaunch(id, opts),
+  acceptEngine: (id: string): Promise<string> => need().acceptEngine(id),
+  acceptBaseline: (id: string): Promise<FingerprintBaseline> => need().acceptBaseline(id),
+  engineInfo: (): Promise<EngineInfo | null> => need().engineInfo(),
   stop: (id: string) => need().stop(id),
   openUrl: (id: string, url: string) => need().openUrl(id, url),
   runDiagnostics: (id: string): Promise<FingerprintDiagnostics> => need().runDiagnostics(id),

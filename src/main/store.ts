@@ -3,26 +3,50 @@ import { JSONFile } from 'lowdb/node';
 import { join } from 'path';
 import { mkdirSync, rmSync } from 'fs';
 import { randomUUID } from 'crypto';
-import type { Profile, CreateProfileInput, UpdateProfileInput, ResolvedIdentity, ProxyCheckSnapshot } from './types';
+import type { Profile, CreateProfileInput, UpdateProfileInput, ResolvedIdentity, ProxyCheckSnapshot, FingerprintPlatform, Fingerprint, FingerprintBaseline, FingerprintObservation } from './types';
 import { createWindowCustomization, normalizeProfileIconColor } from './profile-window-customization';
 
 interface Data { profiles: Profile[]; version?: number; nextWindowNumber?: number }
-interface Opts { seedGen?: () => number; idGen?: () => string }
+interface Opts { seedGen?: () => number; idGen?: () => string; defaultPlatform?: FingerprintPlatform }
+
+/**
+ * Persona a NEW profile gets when the caller does not pick one.
+ *
+ * Measured on this Mac 2026-09-09 (harness groups A vs B, 3 profiles x 5 opens):
+ * a Windows persona on a macOS host fails two contradiction checks on every
+ * profile — the WebGL renderer claims Direct3D11/NVIDIA while the driver exposes
+ * Apple GPU extensions (pvrtc/astc/etc), and the font stack shows zero Windows
+ * families but ten Mac-only ones. It also collides on one MORE fingerprint field
+ * than the macOS persona does. Spoofing Windows from a Mac buys nothing here and
+ * costs two detectable lies, so a Mac host defaults to its native persona.
+ *
+ * Existing profiles are never re-personaed: `platform` is part of the locked
+ * identity and `migrate()` leaves saved values untouched.
+ */
+export function defaultPlatformFor(hostPlatform: NodeJS.Platform = process.platform): FingerprintPlatform {
+  return hostPlatform === 'darwin' ? 'macos' : 'windows';
+}
 
 const defaultSeed = () => Math.floor(Math.random() * 99_990_000) + 10_000;
 
 /** Bump when the Profile shape changes; `migrate()` backfills older records. */
-const SCHEMA_VERSION = 7;
+const SCHEMA_VERSION = 8;
 const LOCKED_IDENTITY_FIELDS = ['proxy', 'geoip', 'timezone', 'locale', 'platform'] as const;
+
+/** Engine of a pre-v8 baseline nobody recorded. Compared as a value, never
+ *  silently treated as "matches whatever is running now". */
+export const UNKNOWN_ENGINE = 'unknown';
 
 export class ProfileStore {
   private db!: Low<Data>;
   private seedGen: () => number;
   private idGen: () => string;
+  private defaultPlatform: FingerprintPlatform;
 
   constructor(private dataDir: string, opts: Opts = {}) {
     this.seedGen = opts.seedGen ?? defaultSeed;
     this.idGen = opts.idGen ?? randomUUID;
+    this.defaultPlatform = opts.defaultPlatform ?? defaultPlatformFor();
   }
 
   async init(): Promise<void> {
@@ -37,6 +61,10 @@ export class ProfileStore {
    *  builds, so existing data keeps working after an app update. */
   private migrate(): boolean {
     let changed = false;
+    // The version the data was saved at, read before this method rewrites it.
+    // A v8 baseline promoted out of an older record must say which shape it came
+    // from, not the shape it is being read into.
+    const priorVersion = this.db.data.version ?? 0;
     const profiles = this.db.data.profiles as (Profile & Record<string, unknown>)[];
     const usedWindowNumbers = new Set<number>();
     const needsWindowNumber: (Profile & Record<string, unknown>)[] = [];
@@ -46,6 +74,29 @@ export class ProfileStore {
       if (p.startUrl === undefined) { p.startUrl = null; changed = true; }
       if (p.visitorId === undefined) { p.visitorId = null; changed = true; }
       if (p.diagnostics === undefined) { p.diagnostics = null; changed = true; }
+      // v8: split the single `fingerprint` field into an accepted baseline and a
+      // latest observation. The old value was whatever the first launch saw and
+      // was never refreshed, so it is exactly the baseline — promote it, and
+      // leave the observation empty rather than inventing one.
+      if (p.baseline === undefined) {
+        const legacy = p.fingerprint as Fingerprint | null | undefined;
+        p.baseline = legacy
+          ? {
+              fingerprint: legacy,
+              acceptedAt: p.resolvedIdentity?.lockedAt ?? String(p.createdAt ?? new Date().toISOString()),
+              // Only a locked profile recorded which engine produced it. For the
+              // rest we do not know, and 'unknown' must not later be compared as
+              // if it were a real version.
+              engineVersion: p.resolvedIdentity?.cloakBrowserVersion ?? UNKNOWN_ENGINE,
+              schemaVersion: priorVersion,
+              source: p.identityLocked ? 'identity-lock' : 'first-launch',
+            }
+          : null;
+        changed = true;
+      }
+      if (p.lastObservation === undefined) { p.lastObservation = null; changed = true; }
+      if (p.lastObservationError === undefined) { p.lastObservationError = null; changed = true; }
+      if ('fingerprint' in p) { delete (p as Record<string, unknown>).fingerprint; changed = true; }
       if (p.identityLocked === undefined) { p.identityLocked = false; changed = true; }
       if (p.resolvedIdentity === undefined) { p.resolvedIdentity = null; changed = true; }
       if (p.lastProxyCheck === undefined) { p.lastProxyCheck = null; changed = true; }
@@ -107,14 +158,16 @@ export class ProfileStore {
       id,
       name: input.name,
       seed: this.seedGen(),
-      platform: input.platform ?? 'windows',
+      platform: input.platform ?? this.defaultPlatform,
       proxy: input.proxy ?? null,
       geoip: input.geoip ?? true,
       timezone: input.timezone ?? null,
       locale: input.locale ?? null,
       startUrl: input.startUrl ?? null,
       userDataDir,
-      fingerprint: null,
+      baseline: null,
+      lastObservation: null,
+      lastObservationError: null,
       visitorId: null,
       diagnostics: null,
       identityLocked: false,
@@ -184,7 +237,14 @@ export class ProfileStore {
       country: identity.exitCountry,
       timezone: identity.exitTimezone ?? undefined,
     };
-    p.fingerprint = identity.fingerprint;
+    // Locking is an explicit acceptance, so it may set the baseline.
+    p.baseline = {
+      fingerprint: identity.fingerprint,
+      acceptedAt: identity.lockedAt,
+      engineVersion: identity.cloakBrowserVersion,
+      schemaVersion: SCHEMA_VERSION,
+      source: 'identity-lock',
+    };
     p.visitorId = identity.visitorId;
     p.geoip = false;
     p.timezone = identity.timezone;
@@ -205,12 +265,82 @@ export class ProfileStore {
     return p;
   }
 
+  /**
+   * Record what the browser reported on this launch.
+   *
+   * Never touches the baseline. That separation is the whole point: if an
+   * observation could promote itself, a fingerprint change would rewrite the
+   * record of what the fingerprint was supposed to be, and drift would be
+   * undetectable by construction.
+   */
+  async recordObservation(id: string, fingerprint: Fingerprint, engineVersion: string): Promise<FingerprintObservation> {
+    const p = this.get(id);
+    if (!p) throw new Error(`Profile not found: ${id}`);
+    const observation: FingerprintObservation = {
+      fingerprint,
+      observedAt: new Date().toISOString(),
+      engineVersion,
+    };
+    p.lastObservation = observation;
+    // A successful reading retires the previous failure; keeping it would make
+    // the profile look broken forever after one bad launch.
+    p.lastObservationError = null;
+    await this.db.write();
+    return observation;
+  }
+
+  /**
+   * Record that a reading was attempted and failed.
+   *
+   * Stored, not inferred. Absence of an observation cannot distinguish "never
+   * looked" from "looked and got nothing", and inferring the second from the
+   * first told a migrated profile that a check had failed when none had run.
+   */
+  async recordObservationFailure(id: string, message: string): Promise<void> {
+    const p = this.get(id);
+    if (!p) throw new Error(`Profile not found: ${id}`);
+    p.lastObservationError = { at: new Date().toISOString(), message };
+    await this.db.write();
+  }
+
+  /**
+   * Accept a fingerprint as this profile's baseline.
+   *
+   * `source: 'first-launch'` is the one automatic case — a profile with no
+   * baseline at all has nothing to overwrite. Every other acceptance is a user
+   * action, and an existing baseline is only replaced when `source` says so.
+   */
+  async acceptBaseline(
+    id: string,
+    fingerprint: Fingerprint,
+    engineVersion: string,
+    source: FingerprintBaseline['source'],
+  ): Promise<FingerprintBaseline> {
+    const p = this.get(id);
+    if (!p) throw new Error(`Profile not found: ${id}`);
+    if (p.baseline && source === 'first-launch') {
+      throw new Error('Profile already has an accepted baseline; use an explicit acceptance instead.');
+    }
+    const baseline: FingerprintBaseline = {
+      fingerprint,
+      acceptedAt: new Date().toISOString(),
+      engineVersion,
+      schemaVersion: SCHEMA_VERSION,
+      source,
+    };
+    p.baseline = baseline;
+    await this.db.write();
+    return baseline;
+  }
+
   async resetIdentity(id: string): Promise<Profile> {
     const p = this.get(id);
     if (!p) throw new Error(`Profile not found: ${id}`);
     p.identityLocked = false;
     p.resolvedIdentity = null;
-    p.fingerprint = null;
+    p.baseline = null;
+    p.lastObservation = null;
+    p.lastObservationError = null;
     p.visitorId = null;
     p.diagnostics = null;
     await this.db.write();
@@ -224,7 +354,9 @@ export class ProfileStore {
     if (!p) throw new Error(`Profile not found: ${id}`);
     if (p.identityLocked) throw new Error('Profile identity is locked. Reset identity before changing seed.');
     p.seed = this.seedGen();
-    p.fingerprint = null;
+    p.baseline = null;
+    p.lastObservation = null;
+    p.lastObservationError = null;
     p.visitorId = null;
     p.diagnostics = null;
     p.resolvedIdentity = null;

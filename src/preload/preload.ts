@@ -33,7 +33,11 @@ const api = {
   preflightIdentity: (id: string) => ipcRenderer.invoke('profiles:preflight-identity', id),
   precheckProxy: (id: string) => ipcRenderer.invoke('browser:precheck-proxy', id),
   launch: (id: string) => ipcRenderer.invoke('browser:launch', id),
-  forceLaunch: (id: string) => ipcRenderer.invoke('browser:force-launch', id),
+  forceLaunch: (id: string, opts?: { acceptEngine?: boolean }) =>
+    ipcRenderer.invoke('browser:force-launch', id, opts),
+  acceptEngine: (id: string) => ipcRenderer.invoke('profiles:accept-engine', id),
+  acceptBaseline: (id: string) => ipcRenderer.invoke('profiles:accept-baseline', id),
+  engineInfo: () => ipcRenderer.invoke('app:engine-info'),
   stop: (id: string) => ipcRenderer.invoke('browser:stop', id),
   openUrl: (id: string, url: string) => ipcRenderer.invoke('browser:open-url', id, url),
   runDiagnostics: (id: string) => ipcRenderer.invoke('browser:diagnostics', id),
