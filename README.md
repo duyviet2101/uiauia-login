@@ -50,6 +50,8 @@ Lần chạy đầu app tự tải Chromium stealth (~150 MB) về `~/.cloakbrow
 5. **Xem fingerprint** để đối chiếu giữa các profile; **Đổi seed** nếu muốn danh tính mới.
 
 > ⚠️ Để unlinkability tốt nhất nên chạy trên **Windows** — xem mục hạn chế canvas trên macOS trong tài liệu kỹ thuật.
+>
+> Trên **macOS**: đã đo lại 2026-09-09 ([kết quả](docs/macos-isolation/findings.md)) — các profile trên cùng một máy Mac dùng chung **canvas export hash** và **audio hash**; đây là đúng hai thứ FingerprintJS/browserleaks đọc. Profile mới trên Mac nay mặc định persona **macOS** (giả lập Windows từ Mac đã được đo là *tệ hơn*: không giảm liên kết mà thêm 2 mâu thuẫn kiểm chứng được).
 
 ---
 

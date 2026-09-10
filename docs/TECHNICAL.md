@@ -48,14 +48,22 @@ Profile {
   geoip, timezone, locale, startUrl,
   blockGeolocation, doNotTrack,         // quyền riêng tư qua Chrome Preferences (mục 4.2)
   userDataDir,                          // phiên bền, riêng từng profile
-  fingerprint, visitorId,               // đo ở lần mở đầu
+  baseline,                             // fingerprint ĐÃ CHẤP NHẬN + acceptedAt/engineVersion/schemaVersion/source
+  lastObservation,                      // fingerprint ĐO ĐƯỢC ở lần mở gần nhất (mục 5.1)
+  diagnostics,                          // lần chạy diagnostics ĐẦY ĐỦ gần nhất
+  visitorId,
   identityLocked, resolvedIdentity,     // khoá danh tính (mục 6)
-  lastProxyCheck,                       // cache kết quả proxy (TTL 10') + cờ ipv6 nếu lộ
+  lastProxyCheck,                       // snapshot proxy (cửa sổ bàn giao 90s, mục 6.1) + cờ ipv6
   createdAt, lastOpenedAt
 }
 ```
 
-Migration: `store.migrate()` (SCHEMA_VERSION) tự bù field mới cho profile tạo từ bản cũ → **data cũ vẫn chạy sau khi update app**.
+Migration: `store.migrate()` (`SCHEMA_VERSION`, hiện **8**) tự bù field mới cho profile tạo từ bản cũ → **data cũ vẫn chạy sau khi update app**.
+
+`baseline` và `lastObservation` **không** nằm trong `UpdateProfileInput`: chúng chỉ đổi
+được qua `acceptBaseline()` / `recordObservation()`. Một patch chung chung sẽ cho phép
+bất kỳ chỗ nào âm thầm biến một lần đo thành baseline — đúng thứ mà việc tách này sinh
+ra để chặn.
 
 ## 4. Lõi chống nhận diện (`launch-args.ts`)
 
@@ -97,24 +105,176 @@ Hai cơ chế chạy **trước launch**, ghi vào Chrome thật (không phải 
 
 ## 5. Đo & theo dõi fingerprint
 
-- Lần mở đầu: đọc local `navigator/screen/WebGL` (`captureFingerprint`) ngay trong page hiện có, **không** điều hướng tới origin trung gian và **không** import FingerprintJS CDN. Lưu snapshot vào DB, hiển thị read-only.
-- Nút **Diagnostics** chạy probe local cho `canvas`, `audio` và font availability, lưu hash/summary vào profile để đối chiếu giữa các profile mà không cần mạng.
+- **Mỗi lần mở**: đọc local `navigator/screen/WebGL` (`captureFingerprint`) ngay trong page hiện có, **không** điều hướng tới origin trung gian và **không** import FingerprintJS CDN. Kết quả ghi vào `lastObservation`.
+- Nút **Diagnostics** chạy probe local cho `canvas`, `audio` và font availability, lưu hash/summary vào `diagnostics` để đối chiếu giữa các profile mà không cần mạng.
 - Nút **Test FP** mở trang kiểm tra (browserleaks…) ngay trong profile khi người dùng chủ động muốn kiểm tra bằng dịch vụ bên ngoài.
-- **Đổi seed** xoá fingerprint+visitorId, đo lại ở lần mở kế.
+- **Đổi seed** xoá baseline + observation + visitorId, đo lại ở lần mở kế.
+
+### 5.1 Ba khái niệm khác nhau, ba trường khác nhau
+
+| Trường | Là gì | Ai ghi |
+|---|---|---|
+| `baseline` | fingerprint profile **phải** có | lần mở đầu (tự động, vì chưa có gì để ghi đè) · khoá identity · người dùng bấm chấp nhận |
+| `lastObservation` | fingerprint browser **thực sự** báo ở lần mở gần nhất | mọi lần mở |
+| `diagnostics` | lần chạy probe nặng **đầy đủ** gần nhất | chỉ khi bấm nút Diagnostics |
+
+Trước đây cả ba dồn vào một trường `fingerprint` được ghi đúng **một lần** rồi thôi. Hệ
+quả không phải là "cảnh báo yếu" mà là **không thể có cảnh báo**: cái browser báo về
+chính là bản ghi của cái nó lẽ ra phải báo, nên một thay đổi không có gì để mâu thuẫn.
+
+Ba đồng hồ này lệch nhau là chuyện bình thường — diagnostics thường cũ hơn cả hai cái
+kia — nên UI hiện **cả ba mốc thời gian** cạnh nhau, thay vì một mốc khiến người đọc
+tưởng hai cái còn lại cũng mới bằng.
+
+### 5.2 Sức khoẻ profile (`profile-health.ts`)
+
+`profileHealth(profile)` so `baseline` với `lastObservation` và trả về **đúng bốn**
+trạng thái. Không có điểm số an toàn: một con số bịa ra sẽ mời người dùng hành động
+theo độ chính xác mà dữ liệu không có.
+
+| Trạng thái | Nghĩa |
+|---|---|
+| `stable` | mọi trường được so đều khớp |
+| `changed` | có trường lệch — kèm danh sách `trường / baseline / đo được` |
+| `insufficient` | chưa có gì để so (profile mới, hoặc profile cũ có từ trước khi app lưu baseline) |
+| `check-failed` | có một lần đọc **đã thất bại và được ghi lại** (`lastObservationError`), mới hơn lần đọc thành công gần nhất |
+
+Ba điểm cố ý **không** kết luận:
+
+- Profile không có baseline là `insufficient`, **không phải** "lỗi". Một profile cũ chưa
+  làm gì sai cả.
+- `capturedAt` bị loại khỏi phép so — nó khác nhau ở mọi lần mở theo định nghĩa, để vào
+  thì profile nào cũng "đổi" vĩnh viễn.
+- **Đổi engine được báo là đổi engine**, không phải bằng chứng bị can thiệp. Đó là lý do
+  thông thường nhất khiến fingerprint dịch chuyển, nên nó hiện cạnh danh sách trường
+  lệch chứ không trộn vào đó.
+- Đo hỏng (`check-failed`) không bao giờ hiển thị như "không có gì đổi". Một phép đo
+  không xảy ra không phải bằng chứng rằng mọi thứ y nguyên.
+- **`check-failed` được GHI LẠI, không suy ra.** "Không có observation" có hai nguyên
+  nhân rất khác nhau — app chưa từng nhìn, hoặc app đã nhìn và không thấy gì — và chỉ từ
+  sự vắng mặt thì không phân biệt được. Phiên bản đầu suy ra kiểu đó và **đã cho ra câu
+  trả lời sai trên dữ liệu thật**: profile duy nhất của người dùng (store còn ở schema
+  v2) bị báo `check-failed` trong khi không có phép kiểm tra nào từng chạy. Nay
+  `recordObservationFailure()` ghi lại thất bại, và một lần đọc thành công sẽ xoá nó.
+
+Chấp nhận thay đổi là **thao tác của người dùng** (`acceptCurrentFingerprint`), và nó
+đòi phải có một lần đo để chấp nhận — ghi baseline cũ đè lên chính nó rồi báo thành
+công còn tệ hơn là từ chối.
 
 ## 6. Identity lock & drift detection (`IdentityService`)
 
 Vấn đề: proxy đổi IP, cập nhật binary, hay sửa cấu hình giữa chừng làm danh tính "trôi" → nền tảng nghi ngờ. Cơ chế:
 
 - **Lock:** sau lần mở đầu thành công (có proxy + fingerprint), chốt `resolvedIdentity` = { seed, platform, proxy, exitIp, cloakBrowserVersion, timezone, locale, fingerprint, visitorId }.
-- **Preflight (mở lần sau):** so sánh hiện tại với bản khoá: seed, platform, proxy, timezone, locale, version, và **exit IP** (đo lại qua proxy, cache TTL 10'). Lệch → ném `IdentityDriftError`, **chặn mở**.
+- **Preflight (mở lần sau):** so sánh hiện tại với bản khoá: seed, platform, proxy, timezone, locale, version, và **exit IP** (đo lại qua proxy; snapshot cũ chỉ dùng lại trong **90 giây**, xem §6.1). Lệch → ném `IdentityDriftError`, **chặn mở**.
 - **Dung sai IP:** `sameIpScope()` coi cùng `/24` là cùng danh tính (proxy residential sticky hay đổi octet cuối) → tránh báo nhầm.
-- **forceLaunch ("chấp nhận IP mới"):** re-align bản khoá theo môi trường hiện tại (exit IP, version), **giữ** seed/fingerprint/cookie — lựa chọn an toàn thay vì reset hẳn.
+- **forceLaunch ("Mở & cập nhật IP"):** re-align bản khoá theo **IP hiện tại**, **giữ** seed/fingerprint/cookie **và giữ nguyên phiên bản engine đã khoá** — lựa chọn an toàn thay vì reset hẳn.
+- **"Chấp nhận engine mới" là thao tác RIÊNG** (`forceLaunch(id, { acceptEngine: true })` hoặc `acceptEngineVersion(id)` nếu không muốn mở browser). Ghi lại `engineAcceptedAt`.
+
+> **Sửa 2026-09-09:** trước đây `reconcilePatch()` luôn gắn `cloakBrowserVersion` hiện tại, nên **một cú nhấn "Mở & cập nhật IP" âm thầm chấp nhận luôn engine mới**. Hai quyết định này có mức rủi ro khác nhau — nâng engine làm đổi fingerprint mà site nhìn thấy, xoay IP thì không — nên nay chúng tách hẳn, và hộp thoại drift nêu rõ engine đang khoá ở bản nào so với bản đang chạy.
+
+### 6.1 Preflight phải chạy trước `launchPersistentContext` — không phải sau
+
+`buildLaunchArgs` truyền `--restore-last-session`, nên **Chromium tự mở lại tab của
+phiên trước** ngay khi tiến trình khởi động. Đây không phải suy luận: probe
+`scripts/verify-windows/session-restore-probe.ts` đo được request của tab khôi phục đến
+đích **sớm hơn 49 ms so với lúc `launchPersistentContext` trả về**. Khi dòng lệnh kế
+tiếp trong app bắt đầu chạy thì website đã nhận request rồi.
+
+Vì vậy toàn bộ cổng chặn nằm trong `BrowserManager.preflight()`, chạy trước khi gọi
+launcher:
+
+1. Profile **đã khoá** → so sánh identity (như §6). Lệch → `IdentityDriftError`.
+2. Profile **có proxy** → xác minh proxy ra được exit IP. Snapshot chỉ được dùng lại
+   nếu **thành công, có exit IP, và mới dưới 90 giây**; snapshot thất bại không bao giờ
+   được tin.
+3. Profile **có phiên cũ** (`lastOpenedAt !== null`) mà bước 2 không cho ra exit IP →
+   `ProxyPreflightError`, **không gọi launcher**.
+
+Ba điểm dễ hiểu nhầm:
+
+- **Lần mở đầu tiên vẫn cho qua** dù proxy hỏng. Cookie jar rỗng thì không có gì để
+  replay; proxy hỏng chỉ tốn của người dùng một trang lỗi, không tạo liên kết.
+- **`forceLaunch` cũng chịu cổng này.** "Chấp nhận drift" nghĩa là bỏ qua *so sánh
+  identity*, không phải bỏ qua *xác minh exit*.
+- **Không có "mở bằng mọi giá".** Tab tự replay lúc khởi động, nên không có thời điểm
+  nào để người dùng chen vào giữa. Muốn mở thì sửa proxy hoặc gỡ proxy khỏi profile.
+
+Mức bảo đảm — nói đúng, không nói quá: app **không có** gateway/firewall, nên không
+tuyên bố "không byte nào ra mạng trước khi kiểm tra". Điều bảo đảm được hẹp hơn:
+**preflight hỏng thì `launchPersistentContext` không được gọi, nên không tồn tại tiến
+trình Chromium nào để khôi phục phiên.**
+
+> **Sửa 2026-09-10:** trước đây proxy của profile **chưa khoá** chỉ được test *sau* khi
+> launch (để quyết định có khoá hay không), và TTL snapshot là **10 phút** — đủ dài để
+> một proxy dân cư xoay IP vài lần bên trong cửa sổ đó. Cả hai đều là cổng chặn trên
+> giấy: cái thứ nhất chạy sau khi tab đã replay, cái thứ hai duyệt bằng dữ liệu cũ.
+
+### 6.2 Xác minh engine (`engine-info.ts`)
+
+Identity đã khoá ghi `cloakBrowserVersion` theo `binaryInfo().version`. Nhưng con số đó
+là **marker của package** — tên một thư mục và một URL tải — chứ không phải bằng chứng
+về thứ nằm trong thư mục đó. Đặt `CLOAKBROWSER_BINARY_PATH` trỏ vào build khác thì bản
+ghi thành hư cấu mà không ai nhận ra.
+
+Lúc khởi động, `readEngineInfo()` hỏi thẳng binary (`--version`) và so:
+
+| Trường | Là gì |
+|---|---|
+| `markerVersion` | package giải theo nền tảng, vd `145.0.7632.109.2` |
+| `binaryVersion` | binary tự khai, vd `145.0.7632.109` |
+| `bundledVersion` | "mới nhất trên **mọi** nền tảng" — trên darwin là bản **không có build macOS**; không bao giờ được coi là engine đang dùng |
+
+Marker = version Chromium (4 số) + số hiệu patch của CloakBrowser, còn binary chỉ khai
+phần Chromium — nên chỉ so được trên tiền tố đó (`chromiumPartOf`).
+
+Bốn tình huống được **báo**, không tình huống nào bị **tự sửa**:
+
+| `kind` | Khi nào |
+|---|---|
+| `not-installed` | không có binary ở đường dẫn package trỏ tới |
+| `unreadable` | có file nhưng không trả lời `--version` — chưa xác minh được, và **không** mặc định là khớp |
+| `version-mismatch` | package khai một đằng, binary khai một nẻo |
+| `pin-unsatisfied` | đặt `CLOAKBROWSER_VERSION` nhưng đang chạy bản khác |
+
+Có vấn đề thì App hiện banner; không có vấn đề thì im lặng — và im lặng ở đây nghĩa là
+**đã kiểm và khớp**, không phải "chưa kiểm". App không tự tải, không tự nâng, không tự
+hạ engine.
+
+Đo trên máy này 2026-09-11: marker `145.0.7632.109.2` · binary `145.0.7632.109` · tier
+`free` · `problems: []`.
+
+> Trên darwin chỉ tồn tại **một** build công khai (findings §8d), nên pin version ở đây
+> không phải cần gạt thật. `CLOAKBROWSER_VERSION` được tôn trọng và báo khi không thoả,
+> nhưng UI không dựng gì xoay quanh một khả năng không có thật. Giữ binary cũ vô hạn
+> cũng **không** phải chiến lược bảo mật — nó chỉ là tình trạng hiện tại của nguồn tải.
 
 ## 7. Cảnh báo unlinkability (`unlinkability.ts`)
 
-- `level: high` — profile **không proxy** (dùng IP máy chủ); exit IP đã khoá bị đổi hoặc trùng với profile khác.
-- `level: medium` — **trùng host proxy** với profile khác (cùng IP); cùng ASN/ISP+vị trí; **IPv6 lộ ra ngoài** (đo best-effort qua `api6.ipify.org` lúc test proxy — proxy có thể chỉ cover IPv4, mục 9.7).
+Mức độ nói về **điều quan sát được chứng minh**, không nói về việc nó nghe đáng sợ đến đâu:
+
+- `level: high` — **liên kết đã quan sát được**, hoặc mất cô lập đã quan sát được:
+  profile **không proxy** (dùng IP máy chủ) · exit IP đã khoá bị đổi · trùng exit IP với
+  profile khác · `ipv6-shared` (xem dưới).
+- `level: medium` — **cấu hình chắc chắn sẽ tạo liên kết nếu để nguyên**: trùng host
+  proxy với profile khác.
+- `level: low` — **thông tin đáng biết nhưng tự nó không phải bằng chứng liên kết**:
+  `ipv6-present` · `same-asn-geo`. Badge hiển thị xám, **không** có dấu ⚠.
+
+> **Sửa 2026-09-10 — hai cảnh báo cũ vượt quá bằng chứng có được:**
+>
+> **IPv6.** Phép đo `probeIpv6()` chạy *bên trong browser đã đi qua proxy*, nên một proxy
+> có cover IPv6 sẽ trả về địa chỉ IPv6 **của chính nó**. Từ một profile thì không phân
+> biệt được IPv6 của proxy với IPv6 của máy chủ — nhưng cảnh báo cũ vẫn khẳng định "IPv6
+> đang lộ ra ngoài". Nay tách đôi: `ipv6-present` (`low`, nêu đúng là chưa kết luận
+> được) và `ipv6-shared` (`high`, **chỉ** khi cùng một IPv6 xuất hiện dưới **hai proxy
+> khác nhau** — địa chỉ đó không thể đến từ proxy nào cả). Hai profile dùng *chung một*
+> proxy mà thấy chung IPv6 thì **không** bị flag: đó chính là địa chỉ của proxy.
+>
+> **`same-asn-geo`.** Hai profile IP khác nhau nhưng cùng ASN/ISP/thành phố chính là
+> hình dạng của một ISP bình thường — hàng triệu người dùng thật không liên quan gì nhau
+> đều khớp mô tả đó. Nay là `low` và câu chữ nói thẳng đây không phải bằng chứng liên
+> kết.
 
 Hiển thị badge cảnh báo trên từng card.
 
@@ -126,15 +286,113 @@ Hiển thị badge cảnh báo trên từng card.
 
 ## 9. Hạn chế (đầy đủ, đã kiểm chứng)
 
-### 9.1 macOS — canvas & audio không đa dạng hoá theo seed ⚠️ (quan trọng nhất)
-**Nguyên nhân gốc:** binary macOS đang ở Chromium **145.0.7632.109.2 = 25 patch fingerprint**, trong khi Windows/Linux ở **146.0.7680.177.5 = 57 patch** (`cloakbrowser/config.py` PLATFORM_CHROMIUM_VERSIONS). Các patch làm canvas/audio biến thiên theo seed nằm trong bản 57-patch, **chưa có ở bản Mac 25-patch**. (npm 0.4.0 — 2026-06-22 — vẫn để Mac ở 145/25 → nâng version npm không cứu được.)
+### 9.1 macOS — canvas *export* & audio không đa dạng hoá theo seed ⚠️ (quan trọng nhất)
 
-Đã đo thực nghiệm trên macOS (M3): `--fingerprint=<seed>` làm **WebGL renderer đổi** theo seed nhưng **canvas-2D hash VÀ audio hash GIỐNG HỆT** ở mọi seed, và giống cả khi đổi `--fingerprint-platform` windows↔macos. Không có flag canvas/audio → **không sửa được ở tầng app**.
+> **Cập nhật 2026-09-09 — đo lại trên máy thật, sửa nguyên nhân gốc ghi ở bản trước.**
+> Số liệu đầy đủ: [`macos-isolation/findings.md`](macos-isolation/findings.md).
+> 3 nhóm × 3 profile × 5 lần mở × 3 lần đo = 132 quan sát.
 
-Hệ quả & sắc thái:
-- FingerprintJS **visitorId vẫn khác nhau** giữa các profile trên macOS (tổng hợp WebGL/screen/cores/audio… khác) → đa số fingerprinting thương mại vẫn coi là thiết bị khác. Sau khi vary screen/cores (mục 4.1) khoảng cách này càng lớn.
-- Nhưng tracker **chuyên hash canvas/audio thô** (vd tab Canvas của browserleaks) sẽ thấy chung → có thể liên kết.
-- **Khuyến nghị: vận hành account giá trị cao trên Windows** (binary 57-patch vary cả canvas+audio). macOS dùng cho dev/test hoặc rủi ro thấp.
+**Canvas có HAI đường đọc và binary Mac chỉ nhiễu MỘT đường:**
+
+| Đường đọc | Khác theo seed? |
+|---|---|
+| `toDataURL()` (png/jpeg/webp), `toBlob()` | ❌ **giống hệt mọi seed** |
+| `getImageData()` | ✅ khác theo seed |
+| `measureText().width` | ✅ khác theo seed |
+
+Nguyên nhân **không phải** "bản Mac thiếu patch canvas" như tài liệu cũ viết. Patch có
+tồn tại và chạy — trích chuỗi từ binary thấy `fingerprinting-canvas-image-data-noise`,
+`fingerprinting-canvas-measuretext-noise`, `fingerprinting-client-rects-noise` — nhưng
+**không phủ đường encode/export**. Mà `toDataURL()` mới đúng là đường FingerprintJS,
+browserleaks và CreepJS dùng.
+
+**Ba trục thực sự liên kết các profile trên một máy Mac** (đo ở persona macOS, cấu hình
+app, và giống hệt khi chạy engine defaults):
+
+1. `canvas.text.export` — trùng cả 3 profile
+2. `canvas.geometry.export` — trùng cả 3 profile
+3. `audio` — trùng cả 3 profile
+
+**Cẩn thận với các trục "trông như đã khác nhau":** `font.availability`, `font.metrics`
+và `clientRects` cho digest khác nhau giữa các profile, nhưng đó là **hệ quả của nhiễu
+theo seed**, không phải máy khác nhau. Đo tập font thật: **54/57 họ font (95%) được cả
+3 profile phát hiện**, chỉ 3 họ sát ngưỡng (`Baskerville`, `Didot`, `Gill Sans`) bị lật.
+Tập font vẫn là tập của một máy.
+
+**Không có flag nào sửa được:** binary Mac 145 không chứa `--fingerprint-noise`,
+`--fingerprint-webrtc-ip`, `--fingerprint-locale`, `--fingerprint-storage-quota`. Và
+**không tồn tại build macOS free nào mới hơn** `145.0.7632.109.2` (04/03/2026) — mọi
+asset `darwin-arm64` từ 146 trở lên đều trả 404.
+
+**Ổn định identity:** tốt. Qua 5 lần mở lại × 3 lần đo, **không trường nào drift**,
+không trường nào nhiễu trong phiên.
+
+**Khuyến nghị giữ nguyên: chạy account giá trị cao trên Windows.** macOS dùng cho
+dev/test hoặc rủi ro thấp — nhưng lý do nay chính xác hơn: không phải "thiếu patch"
+mà là "patch không phủ đường export".
+
+**Chưa trả lời được:** canvas export hash đó là *riêng máy này* hay *chung cho mọi
+Apple Silicon chạy CloakBrowser 145*? Dữ liệu một máy không phân biệt được — cần một
+Mac thứ hai. Đây là khác biệt giữa "rủi ro cao" và "entropy thấp".
+
+### 9.1b Persona: máy Mac nên khai macOS, không nên giả lập Windows
+
+Đo trực tiếp (nhóm A vs nhóm B, cùng seed, cùng máy): giả lập Windows trên host Mac
+**không giảm được liên kết** (vẫn trùng đúng 3 trục HIGH đó, cộng thêm
+`font.availability`) mà **thêm 2 mâu thuẫn kiểm chứng được trên cả 3 profile**:
+
+1. Renderer khai `ANGLE (NVIDIA … Direct3D11)` nhưng driver phơi ra extension GPU Apple
+   (`pvrtc`, `astc`, `etc`) — máy Windows D3D11 không bao giờ có.
+2. Không một họ font Windows nào tồn tại, trong khi 10 họ font chỉ-có-trên-Mac đều có.
+
+→ Từ 2026-09-09, **profile mới trên host macOS mặc định persona `macos`**
+(`defaultPlatformFor` trong `store.ts`). Profile cũ **giữ nguyên** persona đã lưu —
+`platform` nằm trong `LOCKED_IDENTITY_FIELDS` và `migrate()` không đụng tới.
+
+### 9.1c WebRTC trên macOS — flag chết, không phải leak
+
+`--fingerprint-webrtc-ip` **không tồn tại** trong binary Mac. Nhưng đo thực tế cho thấy
+binary **không phát ICE candidate nào cả** (0 candidate, gathering `complete`), trong
+khi Chrome thật phát đúng 1 candidate mDNS. Nên:
+
+- ✅ Không có leak IP thật qua host candidate.
+- ⚠️ Flag app đang truyền là **flag chết** trên macOS — tài liệu/UI không được tuyên bố
+  là đang chống WebRTC leak trên nền tảng này.
+- ⚠️ 0 candidate là **khác Chrome thật** → một dị thường nhận diện được (chung cho mọi
+  người dùng CloakBrowser, không phải tín hiệu liên kết giữa các profile).
+- ⛔ Mới phủ đường host candidate. Đường srflx (qua STUN, khi có proxy) **chưa đo**.
+
+### 9.1d Hành vi cửa sổ trên macOS — đã đo trên máy thật
+
+`scripts/verify-windows/display-probe.ts`, chạy 2026-09-11 trên MacBook Retina (màn
+logic 1800×1169, DPR 2). Kiểm hai tuyên bố mà `launch-args.ts` dựa vào:
+
+| Kiểm | Kết quả |
+|---|---|
+| `screen` == màn hình thật | 1800×1169 ✓ |
+| `avail` nằm trong `screen` | 1800×1074 ✓ (chừa menu bar + dock) |
+| `inner ≤ outer ≤ screen` | 1800 ≤ 1800 ≤ 1800 ✓ |
+| Cửa sổ nằm trong màn hình | (0,39) 1800×1130 ✓ |
+| DPR phản ánh Retina | 2 ✓ |
+| **Mở tab mới không xê dịch cửa sổ** | geometry y hệt trước/sau ✓ |
+| `screen`/DPR không đổi khi mở tab | ✓ |
+| `screen` không đổi khi fullscreen | ✓ |
+| Cửa sổ trở lại kích thước cũ sau fullscreen | ✓ |
+| `screen`/DPR/`colorDepth` giống hệt qua một lần đóng–mở lại | ✓ |
+
+**Một quan sát cần nói cho đúng.** Khi gọi `requestFullscreen()`,
+`document.fullscreenElement` được set nhưng **viewport không đổi** — cả số JS báo lẫn
+kích thước ảnh render thật (đọc từ header PNG của screenshot) đều đứng yên.
+
+Đây **không phải** hành vi của CloakBrowser. Chạy đúng chuỗi đó trên **Google Chrome
+nguyên bản** trong cùng điều kiện Playwright headed: cũng y như vậy
+(`inner 987 → 987`, render `1974 → 1974`). Một Chromium headed bị lái qua CDP không
+nhận chuyển cảnh fullscreen của macOS. Probe nay tự chạy control này và chỉ báo FAIL khi
+CloakBrowser **khác** Chrome nguyên bản.
+
+Giới hạn phải ghi rõ: chuỗi trên chạy dưới automation. **Fullscreen do người dùng tự
+bấm chưa được kiểm** — cần điều khiển ở tầng OS, chưa làm. Resize/maximize bằng tay cũng
+vậy; thứ đo được là geometry sau `--start-maximized`, sau khi mở tab, và sau khi mở lại.
 
 ### 9.2 Trục screen / cores / memory — ĐÃ vary theo profile
 **Trước đây:** `hardwareConcurrency`, `deviceMemory`, độ phân giải màn hình kẹt cứng (8 / 8 / 1920×1080) ở mọi seed → dùng chung giữa các profile. (Tài liệu cũ ghi sai là "không có flag trong 0.3.31" — flag `--fingerprint-screen-width/height`, `-hardware-concurrency`, `-device-memory` **có sẵn** trong 0.3.31.)
@@ -154,7 +412,7 @@ App không còn tự đo FingerprintJS visitorId trong luồng launch mặc đ�
 
 ### 9.7 Geo / DNT / IPv6 / DNS
 - **Geo:** chỉ **chặn** (không match theo city) — `--fingerprint-location` hỏng trên binary Mac 25-patch (Probe A). Chặn qua Preferences (mục 4.2) đủ để không lộ vị trí thật.
-- **IPv6:** chỉ **cảnh báo best-effort** (thấy IPv6 reachable qua browser proxied). **Không** khẳng định chắc leak (cần biết IP thật của máy). Proxy chỉ cover IPv4 + còn IPv6 route = rủi ro → user tự kiểm.
+- **IPv6:** thấy IPv6 reachable qua browser proxied → báo `ipv6-present` mức `low`, **không** khẳng định là leak (địa chỉ đó có thể là của chính proxy). Chỉ khẳng định leak khi cùng một IPv6 xuất hiện dưới hai proxy khác nhau (`ipv6-shared`, `high`) — xem mục 7.
 - **DNS true leak-test:** **ngoài phạm vi** — cần hạ tầng callback/API ngoài (proxycheck/bash.ws) log resolver IP. Không làm offline; để sau nếu cắm API.
 
 ## 10. Kiểm thử
