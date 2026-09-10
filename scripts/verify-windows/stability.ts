@@ -56,6 +56,12 @@ export interface StabilityRow {
   sharedBy: { value: string; profileIds: string[] }[];
   /** Number of profiles that produced at least one usable value. */
   measuredProfiles: number;
+  /**
+   * Profiles left OUT of the sharing comparison, and why. A profile whose value
+   * moves cannot be said to "share" a value, and silently dropping it would let
+   * the reader assume every measured profile was compared.
+   */
+  excludedFromSharing: { profileId: string; reason: 'noisy-in-session' | 'drifts-across-opens' }[];
 }
 
 const digest = (m: Measured<{ digest: string }> | undefined, missing: string): FieldValue => {
@@ -230,11 +236,27 @@ export function analyzeStability(
     const inSessionStable = profiles.every((p) => p.perOpen.length === 0 || p.inSessionDistinct === 1);
     const acrossOpenStable = profiles.every((p) => p.perOpen.length === 0 || p.acrossOpenDistinct === 1);
 
-    // Cross-profile sharing: only compare profiles whose value is stable across
-    // their own opens, otherwise "shared" is not a well-defined claim.
+    // Cross-profile sharing: only compare profiles whose value is stable BOTH
+    // within an open and across opens. "These two profiles share a value" is not
+    // a well-defined claim about a value that moves.
+    //
+    // The in-session condition used to be missing, and it mattered: `perOpen`
+    // keeps only the FIRST value of each open, so a profile cycling A,B,A inside
+    // every open looks like [A, A, A] — perfectly stable across opens. Two such
+    // profiles were reported as fully shared while `inSessionStable` was false
+    // in the same row. Noise was being read as linkage.
     const byValue = new Map<string, string[]>();
+    const excludedFromSharing: StabilityRow['excludedFromSharing'] = [];
     for (const p of profiles) {
-      if (p.perOpen.length === 0 || p.acrossOpenDistinct !== 1) continue;
+      if (p.perOpen.length === 0) continue;
+      if (p.inSessionDistinct > 1) {
+        excludedFromSharing.push({ profileId: p.profileId, reason: 'noisy-in-session' });
+        continue;
+      }
+      if (p.acrossOpenDistinct !== 1) {
+        excludedFromSharing.push({ profileId: p.profileId, reason: 'drifts-across-opens' });
+        continue;
+      }
       const value = p.perOpen[0];
       const ids = byValue.get(value);
       if (ids) ids.push(p.profileId);
@@ -244,16 +266,27 @@ export function analyzeStability(
       .filter(([, ids]) => ids.length > 1)
       .map(([value, profileIds]) => ({ value, profileIds }));
 
-    return { field: spec.field, severity: spec.severity, profiles, inSessionStable, acrossOpenStable, sharedBy, measuredProfiles };
+    return {
+      field: spec.field, severity: spec.severity, profiles, inSessionStable,
+      acrossOpenStable, sharedBy, measuredProfiles, excludedFromSharing,
+    };
   });
 }
 
-/** Fields where every measured profile shares one value — the linkage headline. */
+/**
+ * Fields where every measured profile shares one value — the linkage headline.
+ *
+ * The denominator is `measuredProfiles`, not the number actually compared. That
+ * is deliberate: if some profiles were excluded for being noisy, this stays
+ * quiet rather than announcing linkage across the subset that happened to be
+ * comparable. A headline that overclaims is worse than no headline.
+ */
 export function fullyShared(rows: StabilityRow[]): StabilityRow[] {
   return rows.filter(
     (r) =>
       r.severity === 'HIGH' &&
       r.measuredProfiles >= 2 &&
+      r.excludedFromSharing.length === 0 &&
       r.sharedBy.length === 1 &&
       r.sharedBy[0].profileIds.length === r.measuredProfiles,
   );

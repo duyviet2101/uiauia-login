@@ -148,11 +148,14 @@ function stabilityTable(rows: StabilityRow[]): string {
       continue;
     }
     const distinct = new Set(measured.map((p) => p.perOpen[0])).size;
+    const excluded = r.excludedFromSharing.length > 0
+      ? ` (${r.excludedFromSharing.length} loại khỏi phép so: ${[...new Set(r.excludedFromSharing.map((e) => e.reason))].join(', ')})`
+      : '';
     const sharedText = r.sharedBy.length === 0
       ? 'nobody'
       : r.sharedBy.map((g) => `${g.profileIds.length} profiles`).join('; ');
     out.push(
-      `| ${r.field} | ${r.severity} | ${r.inSessionStable ? 'yes' : '**no**'} | ${r.acrossOpenStable ? 'yes' : '**no**'} | ${distinct}/${measured.length} | ${sharedText} |`,
+      `| ${r.field} | ${r.severity} | ${r.inSessionStable ? 'yes' : '**no**'} | ${r.acrossOpenStable ? 'yes' : '**no**'} | ${distinct}/${measured.length} | ${sharedText}${excluded} |`,
     );
   }
   return out.join('\n');
