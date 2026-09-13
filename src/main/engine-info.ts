@@ -6,7 +6,7 @@ const exec = promisify(execFile);
 
 export type EngineProblemKind =
   | 'not-installed'     // no binary at the path the package points to
-  | 'unreadable'        // the binary is there but would not report its version
+  | 'unreadable'        // the binary is there but its version could not be read
   | 'version-mismatch'  // the marker and the binary disagree
   | 'pin-unsatisfied';  // CLOAKBROWSER_VERSION asks for something else
 
@@ -21,7 +21,7 @@ export interface EngineInfo {
    * name of a directory and a download — not proof of what is inside it.
    */
   markerVersion: string;
-  /** What the binary says when asked (`--version`). Null when it could not be asked. */
+  /** What the file on disk reports it is. Null when it could not be established. */
   binaryVersion: string | null;
   /**
    * The package's "latest across all platforms" field. On darwin this is a
@@ -122,7 +122,7 @@ export function describeEngine(
   } else if (reportedVersion === null) {
     problems.push({
       kind: 'unreadable',
-      message: `Binary tại ${raw.binaryPath} không trả lời --version. Chưa xác minh được bản đang chạy.`,
+      message: `Không đọc được version của binary tại ${raw.binaryPath}. Chưa xác minh được bản đang chạy.`,
     });
   } else {
     const expected = chromiumPartOf(raw.version);
@@ -156,12 +156,51 @@ export function describeEngine(
   };
 }
 
-/** Ask the binary on disk what it is. Never throws — an unanswered question is
- *  itself a reportable state, not a crash. */
-export async function readBinaryVersion(binaryPath: string): Promise<string | null> {
+/** Runs a command and hands back its stdout. Injectable so the platform split
+ *  below can be tested without a Windows box. */
+export type VersionProbe = (file: string, args: string[]) => Promise<string>;
+
+const defaultProbe: VersionProbe = async (file, args) => {
+  const { stdout } = await exec(file, args, { timeout: 15_000, windowsHide: true });
+  return stdout;
+};
+
+/**
+ * The PowerShell expression that reads a file's version resource.
+ *
+ * Exported for its quoting, which is the only part that can go wrong: the path
+ * sits inside a single-quoted PowerShell string, so an apostrophe in it has to
+ * be doubled or the expression ends early.
+ */
+export function windowsVersionQuery(binaryPath: string): string {
+  return `(Get-Item -LiteralPath '${binaryPath.replace(/'/g, "''")}').VersionInfo.ProductVersion`;
+}
+
+/**
+ * Ask the binary on disk what it is. Never throws — an unanswered question is
+ * itself a reportable state, not a crash.
+ *
+ * Windows takes a different route. `chrome.exe` there is linked as a
+ * GUI-subsystem binary: it starts with no console attached, so `--version`
+ * writes into a stdout nobody is holding. Measured in a Windows 11 VM — the
+ * call printed nothing and left `$LASTEXITCODE` unset, meaning PowerShell did
+ * not even wait for the process. So the question went unanswered on every
+ * Windows machine, and each asking spawned a browser process besides. The PE
+ * version resource carries the same four-component number the marker is
+ * compared on (measured: 146.0.7680.177) and reading it launches nothing.
+ */
+export async function readBinaryVersion(
+  binaryPath: string,
+  platform: string = process.platform,
+  probe: VersionProbe = defaultProbe,
+): Promise<string | null> {
+  const onWindows = platform === 'win32';
+  const file = onWindows ? 'powershell.exe' : binaryPath;
+  const args = onWindows
+    ? ['-NoProfile', '-NonInteractive', '-Command', windowsVersionQuery(binaryPath)]
+    : ['--version'];
   try {
-    const { stdout } = await exec(binaryPath, ['--version'], { timeout: 15_000 });
-    return parseReportedVersion(stdout);
+    return parseReportedVersion(await probe(file, args));
   } catch {
     return null;
   }

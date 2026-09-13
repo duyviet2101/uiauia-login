@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { describeEngine, chromiumPartOf, parseReportedVersion } from '../src/main/engine-info';
+import { describeEngine, chromiumPartOf, parseReportedVersion, readBinaryVersion, windowsVersionQuery, type VersionProbe } from '../src/main/engine-info';
 
 const raw = {
   version: '145.0.7632.109.2',
@@ -79,5 +79,59 @@ describe('describeEngine', () => {
   it('is satisfied by a pin that matches the marker exactly', () => {
     const info = describeEngine(raw, '145.0.7632.109', '145.0.7632.109.2');
     expect(info.problems).toEqual([]);
+  });
+});
+
+describe('readBinaryVersion', () => {
+  // Windows: chrome.exe is linked as a GUI-subsystem binary, so it starts with
+  // no console attached and --version writes to a stdout nobody is holding.
+  // Measured in a Windows 11 VM: the call printed nothing AND left $LASTEXITCODE
+  // unset, i.e. PowerShell did not even wait for it. So the old probe returned
+  // null on every Windows machine while spawning a browser process each time.
+  it('reads the file version resource on Windows instead of running the binary', async () => {
+    const calls: Array<{ file: string; args: string[] }> = [];
+    const run: VersionProbe = async (file, args) => {
+      calls.push({ file, args });
+      return '146.0.7680.177\r\n';
+    };
+
+    const version = await readBinaryVersion(
+      'C:\\Users\\duyviet\\.cloakbrowser\\chromium-146.0.7680.177.5\\chrome.exe',
+      'win32',
+      run,
+    );
+
+    expect(version).toBe('146.0.7680.177');
+    expect(calls).toHaveLength(1);
+    expect(calls[0].file).toBe('powershell.exe');
+    expect(calls[0].args.join(' ')).not.toContain('--version');
+  });
+
+  it('still asks the binary itself on macOS, where --version answers', async () => {
+    const calls: Array<{ file: string; args: string[] }> = [];
+    const run: VersionProbe = async (file, args) => {
+      calls.push({ file, args });
+      return 'Chromium 145.0.7632.109\n';
+    };
+
+    const version = await readBinaryVersion('/Users/x/.../Chromium', 'darwin', run);
+
+    expect(version).toBe('145.0.7632.109');
+    expect(calls[0].file).toBe('/Users/x/.../Chromium');
+    expect(calls[0].args).toEqual(['--version']);
+  });
+
+  it('returns null rather than throwing when the probe fails', async () => {
+    const run: VersionProbe = async () => {
+      throw new Error('ENOENT');
+    };
+    expect(await readBinaryVersion('/nope', 'darwin', run)).toBeNull();
+  });
+});
+
+describe('windowsVersionQuery', () => {
+  it('doubles an apostrophe so a path like C:\\Users\\D\'Angelo cannot break the expression', () => {
+    const query = windowsVersionQuery("C:\\Users\\D'Angelo\\chrome.exe");
+    expect(query).toContain("'C:\\Users\\D''Angelo\\chrome.exe'");
   });
 });

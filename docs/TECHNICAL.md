@@ -229,7 +229,7 @@ là **marker của package** — tên một thư mục và một URL tải — c
 về thứ nằm trong thư mục đó. Đặt `CLOAKBROWSER_BINARY_PATH` trỏ vào build khác thì bản
 ghi thành hư cấu mà không ai nhận ra.
 
-Lúc khởi động, `readEngineInfo()` hỏi thẳng binary (`--version`) và so:
+Lúc khởi động, `readEngineInfo()` hỏi thẳng file trên đĩa và so. Cách hỏi khác nhau theo nền tảng: macOS/Linux chạy `--version`; Windows đọc version resource trong PE qua PowerShell, vì `chrome.exe` ở đó là binary GUI-subsystem — nó khởi động không có console nên `--version` ghi vào một stdout không ai giữ (đo trên Win 11 VM: không in gì, `$LASTEXITCODE` không được set), và mỗi lần hỏi lại sinh thêm một tiến trình browser. Hai đường cho cùng một con số 4 thành phần:
 
 | Trường | Là gì |
 |---|---|
@@ -245,7 +245,7 @@ Bốn tình huống được **báo**, không tình huống nào bị **tự s�
 | `kind` | Khi nào |
 |---|---|
 | `not-installed` | không có binary ở đường dẫn package trỏ tới |
-| `unreadable` | có file nhưng không trả lời `--version` — chưa xác minh được, và **không** mặc định là khớp |
+| `unreadable` | có file nhưng không đọc được version của nó — chưa xác minh được, và **không** mặc định là khớp |
 | `version-mismatch` | package khai một đằng, binary khai một nẻo |
 | `pin-unsatisfied` | đặt `CLOAKBROWSER_VERSION` nhưng đang chạy bản khác |
 
