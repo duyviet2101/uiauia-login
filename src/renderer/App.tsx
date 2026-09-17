@@ -8,6 +8,7 @@ import { StartupScreen } from './components/StartupScreen';
 import { ConfirmDialog } from './components/ConfirmDialog';
 import { UpdateBanner } from './components/UpdateBanner';
 import { ToastContainer, type ToastItem, type ToastKind } from './components/Toast';
+import { SessionHistoryDialog } from './components/SessionHistoryDialog';
 
 const TEST_FP_URL = 'https://browserleaks.com/canvas';
 
@@ -28,6 +29,7 @@ export default function App() {
   const [pendingReseed, setPendingReseed] = useState<ProfileRuntime | null>(null);
   const [pendingIdentityReset, setPendingIdentityReset] = useState<ProfileRuntime | null>(null);
   const [pendingIdentityDrift, setPendingIdentityDrift] = useState<{ profile: ProfileRuntime; drift: IdentityDrift[] } | null>(null);
+  const [sessionProfileId, setSessionProfileId] = useState<string | null>(null);
   const [version, setVersion] = useState('');
   const [update, setUpdate] = useState<UpdateStatus | null>(null);
   const [updateDismissed, setUpdateDismissed] = useState(false);
@@ -75,6 +77,7 @@ export default function App() {
     api.engineInfo().then(setEngine).catch(() => {});
     const unsub = api.onStatusChanged(({ id, running }) => {
       setProfiles((prev) => prev.map((p) => (p.id === id ? { ...p, running } : p)));
+      void refresh();
     });
     return () => { unsub(); };
   }, [init.phase, refresh, addToast]);
@@ -143,6 +146,9 @@ export default function App() {
       const blocked = parsePreflightBlock(e) ?? parseEngineBlock(e);
       if (blocked) addToast('error', blocked);
       else addToast('error', `${errPrefix}: ${e instanceof Error ? e.message : String(e)}`);
+      // Launch failures create a history entry in the main process. Pull it in
+      // immediately so the user can inspect the timeout/error without restarting.
+      await refresh().catch(() => {});
     } finally {
       setBusyFor(id, false);
     }
@@ -359,6 +365,7 @@ export default function App() {
           onRegenerateSeed={(id) => setPendingReseed(profiles.find((p) => p.id === id) ?? null)}
           onResetIdentity={(id) => setPendingIdentityReset(profiles.find((p) => p.id === id) ?? null)}
           onAcceptBaseline={handleAcceptBaseline}
+          onShowSessions={setSessionProfileId}
           onDelete={(id) => setPendingDelete(profiles.find((p) => p.id === id) ?? null)}
         />
       </div>
@@ -370,6 +377,11 @@ export default function App() {
           onCancel={() => { setFormOpen(false); setEditing(null); }}
         />
       )}
+
+      {sessionProfileId && (() => {
+        const profile = profiles.find((item) => item.id === sessionProfileId);
+        return profile ? <SessionHistoryDialog profile={profile} onClose={() => setSessionProfileId(null)} /> : null;
+      })()}
 
       {pendingDelete && (
         <ConfirmDialog

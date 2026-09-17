@@ -101,6 +101,33 @@ describe('BrowserManager', () => {
     });
   });
 
+  it('records a running session and closes it when the browser exits', async () => {
+    const { store, mgr, ctx } = await setup();
+    await mgr.launch('p1');
+    expect(store.get('p1')!.sessions[0].status).toBe('running');
+    expect(store.get('p1')!.sessions[0].connectedAt).not.toBeNull();
+
+    await ctx.close();
+    await vi.waitFor(() => expect(store.get('p1')!.sessions[0].status).toBe('closed'));
+    expect(store.get('p1')!.sessions[0].endedAt).not.toBeNull();
+  });
+
+  it('records a failed session when Chromium cannot finish launching', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cloak-'));
+    const store = new ProfileStore(dir, { idGen: () => 'p1', seedGen: () => 9 });
+    await store.init();
+    await store.create({ name: 'A' });
+    const mgr = new BrowserManager(store, vi.fn(async () => {
+      throw new Error('Timeout --proxy-server=http://user:pass@proxy.test:8080');
+    }));
+
+    await expect(mgr.launch('p1')).rejects.toThrow('Timeout');
+    const session = store.get('p1')!.sessions[0];
+    expect(session.status).toBe('failed');
+    expect(session.connectedAt).toBeNull();
+    expect(session.error).toContain('http://***:***@proxy.test:8080');
+  });
+
   it('keeps launch successful when native window customization is unavailable', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'cloak-'));
     const store = new ProfileStore(dir, { idGen: () => 'p1', seedGen: () => 9 });

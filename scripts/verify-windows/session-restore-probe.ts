@@ -35,7 +35,7 @@ function fakeProfile(userDataDir: string): Profile {
     identityLocked: false, resolvedIdentity: null, lastProxyCheck: null,
     blockGeolocation: true, doNotTrack: false,
     windowCustomization: { enabled: false, number: 1, color: '#2563EB' },
-    createdAt: new Date().toISOString(), lastOpenedAt: null,
+    createdAt: new Date().toISOString(), lastOpenedAt: null, sessions: [],
   };
 }
 

@@ -17,7 +17,7 @@ function profile(over: Partial<Profile> = {}): Profile {
     identityLocked: false, resolvedIdentity: null, lastProxyCheck: null,
     blockGeolocation: true, doNotTrack: false,
     windowCustomization: { enabled: true, number: 1, color: '#2563EB' },
-    createdAt: '2026-01-01T00:00:00.000Z', lastOpenedAt: null, ...over,
+    createdAt: '2026-01-01T00:00:00.000Z', lastOpenedAt: null, sessions: [], ...over,
   };
 }
 

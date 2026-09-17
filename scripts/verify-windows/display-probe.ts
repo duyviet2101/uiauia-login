@@ -80,7 +80,7 @@ function fakeProfile(userDataDir: string): Profile {
     visitorId: null, diagnostics: null, identityLocked: false, resolvedIdentity: null,
     lastProxyCheck: null, blockGeolocation: true, doNotTrack: false,
     windowCustomization: { enabled: false, number: 1, color: '#2563EB' },
-    createdAt: new Date().toISOString(), lastOpenedAt: null,
+    createdAt: new Date().toISOString(), lastOpenedAt: null, sessions: [],
   };
 }
 

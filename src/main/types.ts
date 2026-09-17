@@ -147,6 +147,20 @@ export interface FingerprintObservationError {
   message: string;
 }
 
+export type ProfileSessionStatus = 'launching' | 'running' | 'closed' | 'failed' | 'interrupted';
+
+/** One attempt to open a profile. Kept on the profile so its history moves with
+ * the rest of the profile metadata and disappears when that profile is deleted. */
+export interface ProfileSession {
+  id: string;
+  startedAt: string;
+  connectedAt: string | null;
+  endedAt: string | null;
+  status: ProfileSessionStatus;
+  /** Sanitized and bounded before persistence; proxy credentials are never kept. */
+  error: string | null;
+}
+
 export interface Profile {
   id: string;
   name: string;
@@ -178,6 +192,8 @@ export interface Profile {
   windowCustomization: WindowCustomization;
   createdAt: string;
   lastOpenedAt: string | null;
+  /** Newest first; bounded by the store to prevent cloak.json growing forever. */
+  sessions: ProfileSession[];
 }
 
 export interface CreateProfileInput {
@@ -200,7 +216,7 @@ export interface CreateProfileInput {
  * a baseline, which is exactly the confusion this split exists to prevent.
  */
 export type UpdateProfileInput = Partial<
-  Omit<Profile, 'id' | 'seed' | 'userDataDir' | 'createdAt' | 'windowCustomization' | 'baseline' | 'lastObservation' | 'lastObservationError'>
+  Omit<Profile, 'id' | 'seed' | 'userDataDir' | 'createdAt' | 'windowCustomization' | 'baseline' | 'lastObservation' | 'lastObservationError' | 'sessions'>
 > & {
   windowCustomization?: WindowCustomizationInput;
 };

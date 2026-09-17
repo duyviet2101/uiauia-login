@@ -230,6 +230,43 @@ describe('ProfileStore', () => {
     expect(s2.get('fixed')!.name).toBe('A');
   });
 
+  it('records profile sessions and redacts proxy credentials from launch errors', async () => {
+    const store = await makeStore();
+    const profile = await store.create({ name: 'A' });
+    const session = await store.startSession(profile.id);
+    expect(store.get(profile.id)!.sessions[0].status).toBe('launching');
+
+    await store.finishSession(
+      profile.id,
+      session.id,
+      'failed',
+      new Error('launch --proxy-server=http://secret-user:secret-pass@127.0.0.1:8080 timed out'),
+    );
+
+    const failed = store.get(profile.id)!.sessions[0];
+    expect(failed.status).toBe('failed');
+    expect(failed.endedAt).not.toBeNull();
+    expect(failed.error).toContain('http://***:***@127.0.0.1:8080');
+    expect(failed.error).not.toContain('secret-user');
+    expect(failed.error).not.toContain('secret-pass');
+  });
+
+  it('marks an unfinished session as interrupted after an app restart', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cloak-session-'));
+    const first = new ProfileStore(dir, { idGen: () => 'fixed', seedGen: () => 7 });
+    await first.init();
+    await first.create({ name: 'A' });
+    const session = await first.startSession('fixed');
+    await first.markSessionRunning('fixed', session.id);
+
+    const second = new ProfileStore(dir);
+    await second.init();
+    const recovered = second.get('fixed')!.sessions[0];
+    expect(recovered.status).toBe('interrupted');
+    expect(recovered.connectedAt).not.toBeNull();
+    expect(recovered.endedAt).not.toBeNull();
+  });
+
   it('does not reuse a deleted native window number', async () => {
     const store = await makeStore();
     const first = await store.create({ name: 'A' });

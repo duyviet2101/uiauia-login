@@ -3,7 +3,7 @@ import { JSONFile } from 'lowdb/node';
 import { join } from 'path';
 import { mkdirSync, rmSync } from 'fs';
 import { randomUUID } from 'crypto';
-import type { Profile, CreateProfileInput, UpdateProfileInput, ResolvedIdentity, ProxyCheckSnapshot, FingerprintPlatform, Fingerprint, FingerprintBaseline, FingerprintObservation } from './types';
+import type { Profile, CreateProfileInput, UpdateProfileInput, ResolvedIdentity, ProxyCheckSnapshot, FingerprintPlatform, Fingerprint, FingerprintBaseline, FingerprintObservation, ProfileSession } from './types';
 import { createWindowCustomization, normalizeProfileIconColor } from './profile-window-customization';
 
 interface Data { profiles: Profile[]; version?: number; nextWindowNumber?: number }
@@ -30,7 +30,8 @@ export function defaultPlatformFor(hostPlatform: NodeJS.Platform = process.platf
 const defaultSeed = () => Math.floor(Math.random() * 99_990_000) + 10_000;
 
 /** Bump when the Profile shape changes; `migrate()` backfills older records. */
-const SCHEMA_VERSION = 8;
+const SCHEMA_VERSION = 9;
+const MAX_PROFILE_SESSIONS = 100;
 const LOCKED_IDENTITY_FIELDS = ['proxy', 'geoip', 'timezone', 'locale', 'platform'] as const;
 
 /** Engine of a pre-v8 baseline nobody recorded. Compared as a value, never
@@ -102,6 +103,20 @@ export class ProfileStore {
       if (p.lastProxyCheck === undefined) { p.lastProxyCheck = null; changed = true; }
       if (p.blockGeolocation === undefined) { p.blockGeolocation = true; changed = true; }
       if (p.doNotTrack === undefined) { p.doNotTrack = false; changed = true; }
+      if (!Array.isArray(p.sessions)) { p.sessions = []; changed = true; }
+      // A live session cannot survive an app restart. Preserve the record and
+      // make that abrupt ending explicit instead of showing it as running forever.
+      for (const session of p.sessions) {
+        if (session.status === 'launching' || session.status === 'running') {
+          session.status = 'interrupted';
+          session.endedAt = session.endedAt ?? new Date().toISOString();
+          changed = true;
+        }
+      }
+      if (p.sessions.length > MAX_PROFILE_SESSIONS) {
+        p.sessions = p.sessions.slice(0, MAX_PROFILE_SESSIONS);
+        changed = true;
+      }
       // diagnostics gained nonStandardFonts in v0.4.0; backfill so the renderer
       // never reads .length off undefined (which blanked the fingerprint view).
       const diag = p.diagnostics as { nonStandardFonts?: string[] } | null;
@@ -178,6 +193,7 @@ export class ProfileStore {
       windowCustomization: createWindowCustomization(windowNumber, input.windowCustomization),
       createdAt: new Date().toISOString(),
       lastOpenedAt: null,
+      sessions: [],
     };
     this.db.data.profiles.push(profile);
     await this.db.write();
@@ -223,6 +239,53 @@ export class ProfileStore {
     if (!p) throw new Error(`Profile not found: ${id}`);
     p.lastProxyCheck = snapshot;
     await this.db.write();
+  }
+
+  async startSession(id: string): Promise<ProfileSession> {
+    const p = this.get(id);
+    if (!p) throw new Error(`Profile not found: ${id}`);
+    const session: ProfileSession = {
+      id: randomUUID(),
+      startedAt: new Date().toISOString(),
+      connectedAt: null,
+      endedAt: null,
+      status: 'launching',
+      error: null,
+    };
+    p.sessions.unshift(session);
+    p.sessions = p.sessions.slice(0, MAX_PROFILE_SESSIONS);
+    await this.db.write();
+    return session;
+  }
+
+  async markSessionRunning(profileId: string, sessionId: string): Promise<void> {
+    const session = this.session(profileId, sessionId);
+    if (session.status !== 'launching') return;
+    session.status = 'running';
+    session.connectedAt = new Date().toISOString();
+    await this.db.write();
+  }
+
+  async finishSession(
+    profileId: string,
+    sessionId: string,
+    status: 'closed' | 'failed',
+    error?: unknown,
+  ): Promise<void> {
+    const session = this.session(profileId, sessionId);
+    if (session.endedAt) return;
+    session.status = status;
+    session.endedAt = new Date().toISOString();
+    session.error = status === 'failed' ? sanitizeSessionError(error) : null;
+    await this.db.write();
+  }
+
+  private session(profileId: string, sessionId: string): ProfileSession {
+    const p = this.get(profileId);
+    if (!p) throw new Error(`Profile not found: ${profileId}`);
+    const session = p.sessions.find((item) => item.id === sessionId);
+    if (!session) throw new Error(`Profile session not found: ${sessionId}`);
+    return session;
   }
 
   async lockIdentity(id: string, identity: ResolvedIdentity, proxySnapshot?: ProxyCheckSnapshot): Promise<Profile> {
@@ -371,4 +434,13 @@ export class ProfileStore {
     this.db.data.profiles = this.db.data.profiles.filter((x) => x.id !== id);
     await this.db.write();
   }
+}
+
+/** Launch errors include Chromium's full command line, which can contain an
+ * authenticated proxy URL. Keep the useful diagnosis without persisting secrets. */
+function sanitizeSessionError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error ?? 'Unknown launch error');
+  return message
+    .replace(/([a-z][a-z0-9+.-]*:\/\/)([^@\s]+)@/gi, '$1***:***@')
+    .slice(0, 4_000);
 }

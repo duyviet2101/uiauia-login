@@ -29,6 +29,7 @@ function profile(over: Partial<Profile> = {}): Profile {
   const resolvedIdentity = identity();
   return {
     id: 'p1',
+    sessions: [],
     name: 'P',
     seed: 1,
     platform: 'windows',

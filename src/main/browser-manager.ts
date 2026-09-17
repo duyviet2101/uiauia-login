@@ -58,33 +58,48 @@ export class BrowserManager extends EventEmitter {
     const profile = this.store.get(id);
     if (!profile) throw new Error(`Profile not found: ${id}`);
 
-    // Every check that could stop this launch happens here, before Chromium
-    // exists. Past `this.launcher(...)` there is no gate left — see preflight().
-    const { snapshot, engine } = await this.preflight(id, profile, opts);
+    const session = await this.store.startSession(id);
 
+    let snapshot: ProxyCheckSnapshot | undefined;
+    let engine: EngineInfo;
+    let ctx: BrowserContext;
     try {
-      await this.preferencesPreparer(profile.userDataDir, {
-        blockGeolocation: profile.blockGeolocation,
-        doNotTrack: profile.doNotTrack,
-      });
-    } catch (error) {
-      // A damaged/locked Preferences file must not make the whole profile
-      // unusable; launch with Chromium defaults and surface the diagnostic.
-      console.warn(`[browser-preferences] Could not prepare profile ${id}:`, error);
-    }
+      // Every check that could stop this launch happens here, before Chromium
+      // exists. Past `this.launcher(...)` there is no gate left — see preflight().
+      ({ snapshot, engine } = await this.preflight(id, profile, opts));
 
-    // Locked profiles launch pinned to the engine preflight just verified.
-    const ctx = await this.launcher(buildLaunchArgs(
-      profile,
-      this.displayProvider(),
-      profile.identityLocked ? engine.markerVersion : undefined,
-    ));
+      try {
+        await this.preferencesPreparer(profile.userDataDir, {
+          blockGeolocation: profile.blockGeolocation,
+          doNotTrack: profile.doNotTrack,
+        });
+      } catch (error) {
+        // A damaged/locked Preferences file must not make the whole profile
+        // unusable; launch with Chromium defaults and surface the diagnostic.
+        console.warn(`[browser-preferences] Could not prepare profile ${id}:`, error);
+      }
+
+      // Locked profiles launch pinned to the engine preflight just verified.
+      ctx = await this.launcher(buildLaunchArgs(
+        profile,
+        this.displayProvider(),
+        profile.identityLocked ? engine.markerVersion : undefined,
+      ));
+    } catch (error) {
+      await this.store.finishSession(id, session.id, 'failed', error).catch(() => {});
+      throw error;
+    }
     this.running.set(id, ctx);
     ctx.on('close', () => {
       this.profileWindowService.detach(id);
       this.running.delete(id);
+      void this.store.finishSession(id, session.id, 'closed')
+        .catch((error) => console.warn(`[profile-session] Could not close session ${session.id}:`, error));
+      // finishSession mutates the in-memory record before its async disk write,
+      // so a renderer refresh triggered by this event already sees it as closed.
       this.emit('status-changed', id, false);
     });
+    await this.store.markSessionRunning(id, session.id);
 
     await this.profileWindowService.attach(profile, ctx).catch((error) => {
       console.warn(`[window-customization] Attach failed for ${id}:`, error);

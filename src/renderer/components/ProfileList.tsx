@@ -35,6 +35,7 @@ interface Props {
   onRegenerateSeed: (id: string) => void;
   onResetIdentity: (id: string) => void;
   onAcceptBaseline: (id: string) => void;
+  onShowSessions: (id: string) => void;
   onDelete: (id: string) => void;
 }
 
@@ -45,7 +46,7 @@ function formatLastOpened(iso: string | null): string {
 
 export function ProfileList({
   profiles, warnings, busy,
-  onLaunch, onStop, onTest, onDiagnostics, onEdit, onDuplicate, onRegenerateSeed, onResetIdentity, onAcceptBaseline, onDelete,
+  onLaunch, onStop, onTest, onDiagnostics, onEdit, onDuplicate, onRegenerateSeed, onResetIdentity, onAcceptBaseline, onShowSessions, onDelete,
 }: Props) {
   const [expanded, setExpanded] = useState<string | null>(null);
 
@@ -178,6 +179,12 @@ export function ProfileList({
                 className="rounded-lg bg-cyan-700 px-3 py-1 text-xs font-medium text-white hover:bg-cyan-600 disabled:opacity-60 transition-colors"
               >
                 Diagnostics
+              </button>
+              <button
+                onClick={() => onShowSessions(p.id)}
+                className="rounded-lg bg-slate-600 px-3 py-1 text-xs text-white hover:bg-slate-500 transition-colors"
+              >
+                Lịch sử ({p.sessions.length})
               </button>
               <button
                 onClick={() => onEdit(p.id)}

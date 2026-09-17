@@ -9,7 +9,7 @@ function profile(id: string, host: string | null, port = 8080): Profile {
     identityLocked: false, resolvedIdentity: null, lastProxyCheck: null,
     blockGeolocation: true, doNotTrack: false,
     windowCustomization: { enabled: true, number: 1, color: '#2563EB' },
-    createdAt: '', lastOpenedAt: null,
+    createdAt: '', lastOpenedAt: null, sessions: [],
     proxy: host ? { type: 'http', host, port } : null,
   };
 }

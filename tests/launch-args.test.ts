@@ -14,7 +14,7 @@ function profile(over: Partial<Profile> = {}): Profile {
     baseline: null, lastObservation: null, lastObservationError: null, visitorId: null, diagnostics: null, identityLocked: false, resolvedIdentity: null, lastProxyCheck: null,
     blockGeolocation: true, doNotTrack: false,
     windowCustomization: { enabled: true, number: 1, color: '#2563EB' },
-    createdAt: '', lastOpenedAt: null, ...over,
+    createdAt: '', lastOpenedAt: null, sessions: [], ...over,
   };
 }
 
