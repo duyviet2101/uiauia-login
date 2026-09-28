@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, writeFileSync } from 'fs';
+import { existsSync, mkdtempSync, readFileSync, statSync, utimesSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { ProfileStore, defaultPlatformFor } from '../src/main/store';
@@ -228,6 +228,63 @@ describe('ProfileStore', () => {
     await s2.init();
     expect(s2.list()).toHaveLength(1);
     expect(s2.get('fixed')!.name).toBe('A');
+  });
+
+  it('keeps a valid mirrored backup after every write', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cloak-backup-'));
+    const store = new ProfileStore(dir, { idGen: () => 'fixed', seedGen: () => 7 });
+    await store.init();
+    await store.create({ name: 'A' });
+
+    const primary = readFileSync(join(dir, 'cloak.json'), 'utf8');
+    const backup = readFileSync(join(dir, 'cloak.json.bak'), 'utf8');
+    expect(JSON.parse(primary)).toEqual(JSON.parse(backup));
+    expect(JSON.parse(backup).profiles[0].seed).toBe(7);
+  });
+
+  it('restores a zero-filled primary from the backup', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cloak-zero-'));
+    const first = new ProfileStore(dir, { idGen: () => 'fixed', seedGen: () => 7 });
+    await first.init();
+    await first.create({ name: 'A', proxy: { type: 'http', host: 'proxy.example', port: 8080 } });
+
+    const path = join(dir, 'cloak.json');
+    writeFileSync(path, Buffer.alloc(statSync(path).size));
+
+    const second = new ProfileStore(dir);
+    await second.init();
+    expect(second.get('fixed')!.name).toBe('A');
+    expect(second.get('fixed')!.seed).toBe(7);
+    expect(second.get('fixed')!.proxy?.host).toBe('proxy.example');
+    expect(JSON.parse(readFileSync(path, 'utf8')).profiles[0].id).toBe('fixed');
+  });
+
+  it('uses a newer valid backup when shutdown happened before replacing the primary', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cloak-newer-backup-'));
+    const first = new ProfileStore(dir, { idGen: () => 'fixed', seedGen: () => 7 });
+    await first.init();
+    await first.create({ name: 'old' });
+    const oldPrimary = readFileSync(join(dir, 'cloak.json'), 'utf8');
+    await first.update('fixed', { name: 'new' });
+
+    const primaryPath = join(dir, 'cloak.json');
+    writeFileSync(primaryPath, oldPrimary);
+    const oldTime = new Date(Date.now() - 10_000);
+    utimesSync(primaryPath, oldTime, oldTime);
+
+    const second = new ProfileStore(dir);
+    await second.init();
+    expect(second.get('fixed')!.name).toBe('new');
+  });
+
+  it('refuses to silently reset when both metadata copies are corrupt', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cloak-corrupt-'));
+    writeFileSync(join(dir, 'cloak.json'), Buffer.alloc(100));
+    writeFileSync(join(dir, 'cloak.json.bak'), 'not json');
+
+    const store = new ProfileStore(dir);
+    await expect(store.init()).rejects.toThrow(/refusing to replace profile metadata/i);
+    expect(existsSync(join(dir, 'profiles'))).toBe(false);
   });
 
   it('records profile sessions and redacts proxy credentials from launch errors', async () => {

@@ -1,13 +1,112 @@
 import { Low } from 'lowdb';
-import { JSONFile } from 'lowdb/node';
-import { join } from 'path';
-import { mkdirSync, rmSync } from 'fs';
+import { basename, dirname, join } from 'path';
+import { closeSync, fsyncSync, mkdirSync, openSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs';
+import { rename } from 'fs/promises';
 import { randomUUID } from 'crypto';
 import type { Profile, CreateProfileInput, UpdateProfileInput, ResolvedIdentity, ProxyCheckSnapshot, FingerprintPlatform, Fingerprint, FingerprintBaseline, FingerprintObservation, ProfileSession } from './types';
 import { createWindowCustomization, normalizeProfileIconColor } from './profile-window-customization';
 
 interface Data { profiles: Profile[]; version?: number; nextWindowNumber?: number }
 interface Opts { seedGen?: () => number; idGen?: () => string; defaultPlatform?: FingerprintPlatform }
+
+interface StoreCandidate {
+  path: string;
+  text: string;
+  data: Data | null;
+  mtimeMs: number;
+}
+
+function parseStore(text: string): Data {
+  const parsed: unknown = JSON.parse(text);
+  if (!parsed || typeof parsed !== 'object' || !Array.isArray((parsed as Data).profiles)) {
+    throw new Error('Profile store must contain a profiles array.');
+  }
+  return parsed as Data;
+}
+
+function readStoreCandidate(path: string): StoreCandidate | null {
+  try {
+    const text = readFileSync(path, 'utf8');
+    let data: Data | null = null;
+    try { data = parseStore(text); } catch { /* invalid candidate */ }
+    return { path, text, data, mtimeMs: statSync(path).mtimeMs };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw error;
+  }
+}
+
+async function replaceDurably(path: string, text: string): Promise<void> {
+  const temporary = join(dirname(path), `.${basename(path)}.tmp`);
+  const fd = openSync(temporary, 'w', 0o600);
+  try {
+    writeFileSync(fd, text, 'utf8');
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      await rename(temporary, path);
+      break;
+    } catch (error) {
+      if (attempt === 10) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  }
+
+  // POSIX needs the directory entry flushed too. Windows cannot open a directory
+  // this way, but the file fsync above still prevents a zero-filled replacement.
+  try {
+    const dirFd = openSync(dirname(path), 'r');
+    try { fsyncSync(dirFd); } finally { closeSync(dirFd); }
+  } catch { /* best-effort on platforms that reject directory handles */ }
+}
+
+class DurableJSONFile {
+  private readonly backupPath: string;
+  private pendingWrite: Promise<void> = Promise.resolve();
+
+  constructor(private readonly path: string) {
+    this.backupPath = `${path}.bak`;
+  }
+
+  async read(): Promise<Data | null> {
+    await this.pendingWrite;
+    const primary = readStoreCandidate(this.path);
+    const backup = readStoreCandidate(this.backupPath);
+    if (!primary && !backup) return null;
+
+    const valid = [primary, backup].filter((candidate): candidate is StoreCandidate & { data: Data } => !!candidate?.data);
+    if (!valid.length) {
+      throw new Error('cloak.json and cloak.json.bak are unreadable; refusing to replace profile metadata.');
+    }
+
+    valid.sort((a, b) => b.mtimeMs - a.mtimeMs || (a.path === this.path ? -1 : 1));
+    const chosen = valid[0];
+    if (primary?.text !== chosen.text || backup?.text !== chosen.text) {
+      console.warn(`[store] Repairing profile metadata from ${basename(chosen.path)}.`);
+      await this.writeRaw(chosen.text);
+    }
+    return chosen.data;
+  }
+
+  write(data: Data): Promise<void> {
+    const text = JSON.stringify(data, null, 2);
+    parseStore(text);
+    const operation = this.pendingWrite.then(() => this.writeRaw(text));
+    this.pendingWrite = operation.catch(() => undefined);
+    return operation;
+  }
+
+  private async writeRaw(text: string): Promise<void> {
+    // Backup reaches stable storage first. A power loss during the primary write
+    // therefore leaves either the old primary or the new backup recoverable.
+    await replaceDurably(this.backupPath, text);
+    await replaceDurably(this.path, text);
+  }
+}
 
 /**
  * Persona a NEW profile gets when the caller does not pick one.
@@ -52,7 +151,7 @@ export class ProfileStore {
 
   async init(): Promise<void> {
     mkdirSync(this.dataDir, { recursive: true });
-    const adapter = new JSONFile<Data>(join(this.dataDir, 'cloak.json'));
+    const adapter = new DurableJSONFile(join(this.dataDir, 'cloak.json'));
     this.db = new Low<Data>(adapter, { profiles: [] });
     await this.db.read();
     if (this.migrate()) await this.db.write();
